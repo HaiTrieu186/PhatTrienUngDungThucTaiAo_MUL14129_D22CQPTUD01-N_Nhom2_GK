@@ -6,6 +6,7 @@ import * as THREE from 'three'
 const earthVertex = `
   varying vec2 vUv;
   varying vec3 vNormal;
+
   void main() {
     vUv = uv;
     vNormal = normalize(normalMatrix * normal);
@@ -17,6 +18,7 @@ const earthFragment = `
   uniform sampler2D uDayTexture;
   uniform sampler2D uNightTexture;
   uniform vec3 uSunDirection;
+
   varying vec2 vUv;
   varying vec3 vNormal;
 
@@ -33,22 +35,31 @@ const earthFragment = `
                    - smoothstep(0.0,   0.5,  sunOrientation);
     vec3 twilightColor = vec3(1.0, 0.4, 0.1) * twilight * 0.6;
 
-    // Đại dương lấp lánh
-    float isOcean = smoothstep(0.3, 0.5, dayColor.b - dayColor.r);
-    vec3 viewDir = normalize(vec3(0.0, 0.0, 1.0));
-    vec3 halfDir = normalize(sunDir + viewDir);
-    float spec = pow(max(dot(normal, halfDir), 0.0), 32.0);
-    vec3 specularColor = vec3(1.0, 0.98, 0.9) * spec * isOcean * dayMix * 0.6;
-
-    vec3 finalColor = mix(nightColor, dayColor, dayMix) + twilightColor + specularColor;
+    vec3 finalColor = mix(nightColor, dayColor, dayMix) + twilightColor;
     gl_FragColor = vec4(finalColor, 1.0);
   }
 `
 
-const SUN_DAY   = new THREE.Vector3(5, 3, 5).normalize()
-const SUN_NIGHT = new THREE.Vector3(-5, -1, -5).normalize()
+const SEASON_SUN = {
+  spring: {
+    day:   new THREE.Vector3( 0,  0,  1),
+    night: new THREE.Vector3( 0,  0, -1),
+  },
+  summer: {
+    day:   new THREE.Vector3(-1,  0,  0),
+    night: new THREE.Vector3( 1,  0,  0),
+  },
+  autumn: {
+    day:   new THREE.Vector3( 0,  0, -1),
+    night: new THREE.Vector3( 0,  0,  1),
+  },
+  winter: {
+    day:   new THREE.Vector3( 1,  0,  0),
+    night: new THREE.Vector3(-1,  0,  0),
+  },
+}
 
-export default function Earth({ isDay, speed = 1 }) {
+export default function Earth({ isDay, speed = 1, season = 'summer' }) {
   const earthRef  = useRef()
   const cloudsRef = useRef()
 
@@ -64,15 +75,14 @@ export default function Earth({ isDay, speed = 1 }) {
   const earthUniforms = useMemo(() => ({
     uDayTexture:   { value: dayTex },
     uNightTexture: { value: nightTex },
-    uSunDirection: { value: SUN_DAY.clone() },
+    uSunDirection: { value: SEASON_SUN.summer.day.clone() },
   }), [dayTex, nightTex])
 
   useFrame((_, delta) => {
-    // tốc độ quay
     if (earthRef.current)  earthRef.current.rotation.y  += delta * 0.05 * speed
     if (cloudsRef.current) cloudsRef.current.rotation.y += delta * 0.08 * speed
 
-    const target = isDay ? SUN_DAY : SUN_NIGHT
+    const target = isDay ? SEASON_SUN[season].day : SEASON_SUN[season].night
     earthUniforms.uSunDirection.value.lerp(target, delta * 1.2)
     earthUniforms.uSunDirection.value.normalize()
   })
