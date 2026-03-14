@@ -1,10 +1,10 @@
-import { Suspense, useState } from 'react'
-import { Canvas } from '@react-three/fiber'
+import { Suspense, useState, useRef } from 'react'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Stars } from '@react-three/drei'
 import * as THREE from 'three'
 import Earth from './Earth'
 import Atmosphere from './Atmosphere'
-import Sun from './Sun' 
+import Sun from './Sun'
 
 const SEASONS = [
   { key: 'spring', label: '🌸 Xuân', color: '#a8e063', border: '#6abf4b' },
@@ -13,10 +13,58 @@ const SEASONS = [
   { key: 'winter', label: '❄️ Đông', color: '#a0c4ff', border: '#5b9bd5' },
 ]
 
+const DEFAULT_CAM = new THREE.Vector3(0, 0, 6)
+const DEFAULT_TARGET = new THREE.Vector3(0, 0, 0)
+
+// Component nằm trong Canvas để dùng được useFrame và useThree
+function CameraResetter({ triggerRef }) {
+  const { camera } = useThree()
+  const isResetting = useRef(false)
+  const targetPos = useRef(new THREE.Vector3())
+  const orbitRef = useRef()
+
+  // Nhận lệnh reset từ bên ngoài qua triggerRef
+  triggerRef.current = (controls) => {
+    orbitRef.current = controls
+    targetPos.current.copy(DEFAULT_CAM)
+    isResetting.current = true
+  }
+
+  useFrame((_, delta) => {
+    if (!isResetting.current) return
+
+    // Lerp camera position về vị trí chuẩn
+    camera.position.lerp(DEFAULT_CAM, delta * 5)
+
+    // Lerp OrbitControls target về (0,0,0)
+    if (orbitRef.current) {
+      orbitRef.current.target.lerp(DEFAULT_TARGET, delta * 5)
+      orbitRef.current.update()
+    }
+
+    // Dừng khi đã đủ gần
+    if (camera.position.distanceTo(DEFAULT_CAM) < 0.01) {
+      camera.position.copy(DEFAULT_CAM)
+      if (orbitRef.current) {
+        orbitRef.current.target.copy(DEFAULT_TARGET)
+        orbitRef.current.update()
+      }
+      isResetting.current = false
+    }
+  })
+
+  return null
+}
+
 export default function App() {
-  const [isDay,  setIsDay]  = useState(true)
   const [speed,  setSpeed]  = useState(1)
   const [season, setSeason] = useState('summer')
+  const orbitRef   = useRef()
+  const triggerRef = useRef(() => {})
+
+  const handleReset = () => {
+    triggerRef.current(orbitRef.current)
+  }
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#000' }}>
@@ -60,29 +108,33 @@ export default function App() {
           ))}
         </div>
 
-        {/* Nút ngày/đêm */}
+        {/* Nút về góc nhìn chuẩn */}
         <button
-          onClick={() => setIsDay(prev => !prev)}
+          onClick={handleReset}
           style={{
             padding: '14px 36px',
             fontSize: '16px',
             fontWeight: 'bold',
             fontFamily: 'sans-serif',
-            background: isDay
-              ? 'linear-gradient(135deg, #1a1a2e, #16213e)'
-              : 'linear-gradient(135deg, #f9a825, #ff6f00)',
-            color: isDay ? '#a0c4ff' : '#fff',
-            border: `2px solid ${isDay ? '#a0c4ff' : '#ffca28'}`,
+            background: 'linear-gradient(135deg, #1a1a2e, #16213e)',
+            color: '#a0c4ff',
+            border: '2px solid #a0c4ff',
             borderRadius: '50px',
             cursor: 'pointer',
             letterSpacing: '1px',
-            boxShadow: isDay
-              ? '0 0 20px rgba(100,160,255,0.4)'
-              : '0 0 20px rgba(255,180,0,0.5)',
+            boxShadow: '0 0 20px rgba(100,160,255,0.4)',
             transition: 'all 0.4s ease',
           }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, #16213e, #0f3460)'
+            e.currentTarget.style.boxShadow = '0 0 28px rgba(100,160,255,0.7)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, #1a1a2e, #16213e)'
+            e.currentTarget.style.boxShadow = '0 0 20px rgba(100,160,255,0.4)'
+          }}
         >
-          {isDay ? '🌙 Chuyển sang Đêm' : '☀️ Chuyển sang Ngày'}
+          🎯 Về góc nhìn chuẩn
         </button>
 
         {/* Slider tốc độ quay */}
@@ -114,20 +166,25 @@ export default function App() {
       </div>
 
       <Canvas camera={{ position: [0, 0, 6], fov: 45 }}>
-        <ambientLight intensity={0.15} />  {/* giảm xuống để đêm tối hơn */}
-
-        {/* Mặt Trời nằm ngoài group nghiêng — world space */}
-        <Sun isDay={isDay} season={season} /> 
+        <ambientLight intensity={0.15} />
+        <Sun season={season} />
+        <CameraResetter triggerRef={triggerRef} />
 
         <Suspense fallback={null}>
           <group rotation={[0, 0, THREE.MathUtils.degToRad(-23.5)]}>
-            <Earth isDay={isDay} speed={speed} season={season} />
+            <Earth speed={speed} season={season} />
             <Atmosphere />
           </group>
         </Suspense>
 
         <Stars radius={100} depth={50} count={6000} factor={4} saturation={0} fade />
-        <OrbitControls enablePan={false} enableZoom={true} minDistance={3} maxDistance={12} />
+        <OrbitControls
+          ref={orbitRef}
+          enablePan={false}
+          enableZoom={true}
+          minDistance={3}
+          maxDistance={12}
+        />
       </Canvas>
     </div>
   )

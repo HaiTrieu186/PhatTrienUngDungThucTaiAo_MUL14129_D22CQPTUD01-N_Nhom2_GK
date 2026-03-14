@@ -8,7 +8,6 @@ const earthVertex = `
   varying vec3 vNormal;
   void main() {
     vUv = uv;
-    // chuyển về local space từ JS qua worldToLocal() mỗi frame
     vNormal = normalize(normal);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
@@ -16,11 +15,9 @@ const earthVertex = `
 
 const earthFragment = `
   precision mediump float;
-
   uniform sampler2D uDayTexture;
   uniform sampler2D uNightTexture;
   uniform vec3 uSunDirection;
-
   varying vec2 vUv;
   varying vec3 vNormal;
 
@@ -42,28 +39,14 @@ const earthFragment = `
   }
 `
 
-// Hướng Mặt Trời trong WORLD SPACE (từ Trái Đất nhìn về Mặt Trời)
-// θ=0°→Xuân(-1,0,0), θ=90°→Hạ(0,0,-1), θ=180°→Thu(1,0,0), θ=270°→Đông(0,0,1)
 const SEASON_SUN_WORLD = {
-  spring: {
-    day:   new THREE.Vector3(-1,  0,  0),
-    night: new THREE.Vector3( 1,  0,  0),
-  },
-  summer: {
-    day:   new THREE.Vector3( 0,  0, -1),
-    night: new THREE.Vector3( 0,  0,  1),
-  },
-  autumn: {
-    day:   new THREE.Vector3( 1,  0,  0),
-    night: new THREE.Vector3(-1,  0,  0),
-  },
-  winter: {
-    day:   new THREE.Vector3( 0,  0,  1),
-    night: new THREE.Vector3( 0,  0, -1),
-  },
+  spring: new THREE.Vector3(-1, 0,  0),
+  summer: new THREE.Vector3( 0, 0, -1),
+  autumn: new THREE.Vector3( 1, 0,  0),
+  winter: new THREE.Vector3( 0, 0,  1),
 }
 
-export default function Earth({ isDay, speed = 1, season = 'summer' }) {
+export default function Earth({ speed = 1, season = 'summer' }) {
   const earthRef  = useRef()
   const cloudsRef = useRef()
 
@@ -76,8 +59,7 @@ export default function Earth({ isDay, speed = 1, season = 'summer' }) {
   dayTex.colorSpace   = THREE.SRGBColorSpace
   nightTex.colorSpace = THREE.SRGBColorSpace
 
-  // Khai báo ngoài useFrame — không new Vector3 trong vòng lặp (tránh GC spike)
-  const worldSunDir = useRef(SEASON_SUN_WORLD.summer.day.clone())
+  const worldSunDir = useRef(SEASON_SUN_WORLD.summer.clone())
   const localSunDir = useRef(new THREE.Vector3())
 
   const earthUniforms = useMemo(() => ({
@@ -90,18 +72,12 @@ export default function Earth({ isDay, speed = 1, season = 'summer' }) {
     if (earthRef.current)  earthRef.current.rotation.y  += delta * 0.05 * speed
     if (cloudsRef.current) cloudsRef.current.rotation.y += delta * 0.08 * speed
 
-    // Bước 1: Lerp hướng Mặt Trời trong WORLD SPACE
-    const target = isDay ? SEASON_SUN_WORLD[season].day : SEASON_SUN_WORLD[season].night
-    worldSunDir.current.lerp(target, delta * 1.2).normalize()
+    worldSunDir.current.lerp(SEASON_SUN_WORLD[season], delta * 1.2).normalize()
 
-    // Bước 2: Chuyển về LOCAL SPACE của mesh Trái Đất đang quay
-    // worldToLocal hợp lệ ở đây vì mesh không có translation (chỉ có rotation)
-    // → inverse(matrixWorld) * worldSunDir = loại bỏ cả tilt 23.5° lẫn rotation Y hiện tại
     localSunDir.current.copy(worldSunDir.current)
     earthRef.current.worldToLocal(localSunDir.current)
     localSunDir.current.normalize()
 
-    // Bước 3: Truyền vào shader — lúc này dot(vNormal, uSunDirection) đúng không gian
     earthUniforms.uSunDirection.value.copy(localSunDir.current)
   })
 
