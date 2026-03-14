@@ -33,16 +33,22 @@ const earthFragment = `
                    - smoothstep(0.0,   0.5,  sunOrientation);
     vec3 twilightColor = vec3(1.0, 0.4, 0.1) * twilight * 0.6;
 
-    vec3 finalColor = mix(nightColor, dayColor, dayMix) + twilightColor;
+    // Đại dương lấp lánh
+    float isOcean = smoothstep(0.3, 0.5, dayColor.b - dayColor.r);
+    vec3 viewDir = normalize(vec3(0.0, 0.0, 1.0));
+    vec3 halfDir = normalize(sunDir + viewDir);
+    float spec = pow(max(dot(normal, halfDir), 0.0), 32.0);
+    vec3 specularColor = vec3(1.0, 0.98, 0.9) * spec * isOcean * dayMix * 0.6;
+
+    vec3 finalColor = mix(nightColor, dayColor, dayMix) + twilightColor + specularColor;
     gl_FragColor = vec4(finalColor, 1.0);
   }
 `
 
-// Vị trí Mặt Trời: ngày = chiếu thẳng, đêm = chiếu từ phía sau
 const SUN_DAY   = new THREE.Vector3(5, 3, 5).normalize()
 const SUN_NIGHT = new THREE.Vector3(-5, -1, -5).normalize()
 
-export default function Earth({ isDay }) {
+export default function Earth({ isDay, speed = 1 }) {
   const earthRef  = useRef()
   const cloudsRef = useRef()
 
@@ -62,11 +68,10 @@ export default function Earth({ isDay }) {
   }), [dayTex, nightTex])
 
   useFrame((_, delta) => {
-    // Quay Trái Đất và mây
-    if (earthRef.current)  earthRef.current.rotation.y  += delta * 0.05
-    if (cloudsRef.current) cloudsRef.current.rotation.y += delta * 0.08
+    // tốc độ quay
+    if (earthRef.current)  earthRef.current.rotation.y  += delta * 0.05 * speed
+    if (cloudsRef.current) cloudsRef.current.rotation.y += delta * 0.08 * speed
 
-    // Lerp (di chuyển mượt) hướng Mặt Trời về đích
     const target = isDay ? SUN_DAY : SUN_NIGHT
     earthUniforms.uSunDirection.value.lerp(target, delta * 1.2)
     earthUniforms.uSunDirection.value.normalize()
