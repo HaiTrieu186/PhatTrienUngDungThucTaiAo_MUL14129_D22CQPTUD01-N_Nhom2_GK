@@ -7,7 +7,6 @@ import Earth from './Earth'
 import Atmosphere from './Atmosphere'
 import Sun from './Sun'
 
-// Tạo XR store — quản lý phiên VR
 const xrStore = createXRStore()
 
 const SEASONS = [
@@ -63,10 +62,22 @@ export default function App() {
 
   const handleReset = () => triggerRef.current(orbitRef.current)
 
+  const handleEnterVR = async () => {
+    if (!navigator.xr) {
+      alert('Trình duyệt không hỗ trợ WebXR.\nDùng Meta Browser trên Quest 3 để vào VR.')
+      return
+    }
+    const supported = await navigator.xr.isSessionSupported('immersive-vr')
+    if (!supported) {
+      alert('Thiết bị không hỗ trợ Immersive VR.\nMở trên Meta Quest 3 để trải nghiệm.')
+      return
+    }
+    xrStore.enterVR()
+  }
+
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#000' }}>
 
-      {/* UI controls */}
       <div style={{
         position: 'absolute', bottom: '32px', left: '50%',
         transform: 'translateX(-50%)', zIndex: 10,
@@ -92,10 +103,9 @@ export default function App() {
           ))}
         </div>
 
-        {/* Hàng 2 nút: Reset + Enter VR */}
+        {/* Hàng 2 nút */}
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
 
-          {/* Nút về góc nhìn chuẩn */}
           <button onClick={handleReset} style={{
             padding: '14px 28px', fontSize: '15px', fontWeight: 'bold',
             fontFamily: 'sans-serif',
@@ -116,17 +126,14 @@ export default function App() {
             🎯 Về góc nhìn chuẩn
           </button>
 
-          {/* Nút Enter VR — chỉ hiện trên thiết bị hỗ trợ WebXR */}
-          <button
-            onClick={() => xrStore.enterVR()}
-            style={{
-              padding: '14px 28px', fontSize: '15px', fontWeight: 'bold',
-              fontFamily: 'sans-serif',
-              background: 'linear-gradient(135deg, #1a0a2e, #2d1060)',
-              color: '#d4aaff', border: '2px solid #9b59f5', borderRadius: '50px',
-              cursor: 'pointer', letterSpacing: '1px',
-              boxShadow: '0 0 20px rgba(155,89,245,0.4)', transition: 'all 0.4s ease',
-            }}
+          <button onClick={handleEnterVR} style={{
+            padding: '14px 28px', fontSize: '15px', fontWeight: 'bold',
+            fontFamily: 'sans-serif',
+            background: 'linear-gradient(135deg, #1a0a2e, #2d1060)',
+            color: '#d4aaff', border: '2px solid #9b59f5', borderRadius: '50px',
+            cursor: 'pointer', letterSpacing: '1px',
+            boxShadow: '0 0 20px rgba(155,89,245,0.4)', transition: 'all 0.4s ease',
+          }}
             onMouseEnter={e => {
               e.currentTarget.style.background = 'linear-gradient(135deg, #2d1060, #1a0a2e)'
               e.currentTarget.style.boxShadow  = '0 0 28px rgba(155,89,245,0.7)'
@@ -164,7 +171,6 @@ export default function App() {
       </div>
 
       <Canvas camera={{ position: [0, 0, 6], fov: 45 }}>
-        {/* XR bọc toàn bộ scene — bắt buộc để WebXR hoạt động */}
         <XR store={xrStore}>
           <ambientLight intensity={0.15} />
           <Sun season={season} />
