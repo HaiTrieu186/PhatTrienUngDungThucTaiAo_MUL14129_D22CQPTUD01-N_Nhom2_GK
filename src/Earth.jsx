@@ -29,7 +29,6 @@ const earthFragment = `
     float sunOrientation = dot(normal, sunDir);
     float dayMix = smoothstep(-0.25, 0.25, sunOrientation);
 
-    // Thêm viền hoàng hôn màu cam
     float twilight = smoothstep(-0.25, 0.25, sunOrientation)
                    - smoothstep(0.0,   0.5,  sunOrientation);
     vec3 twilightColor = vec3(1.0, 0.4, 0.1) * twilight * 0.6;
@@ -39,7 +38,11 @@ const earthFragment = `
   }
 `
 
-export default function Earth() {
+// Vị trí Mặt Trời: ngày = chiếu thẳng, đêm = chiếu từ phía sau
+const SUN_DAY   = new THREE.Vector3(5, 3, 5).normalize()
+const SUN_NIGHT = new THREE.Vector3(-5, -1, -5).normalize()
+
+export default function Earth({ isDay }) {
   const earthRef  = useRef()
   const cloudsRef = useRef()
 
@@ -55,17 +58,22 @@ export default function Earth() {
   const earthUniforms = useMemo(() => ({
     uDayTexture:   { value: dayTex },
     uNightTexture: { value: nightTex },
-    uSunDirection: { value: new THREE.Vector3(5, 3, 5).normalize() },
+    uSunDirection: { value: SUN_DAY.clone() },
   }), [dayTex, nightTex])
 
   useFrame((_, delta) => {
+    // Quay Trái Đất và mây
     if (earthRef.current)  earthRef.current.rotation.y  += delta * 0.05
     if (cloudsRef.current) cloudsRef.current.rotation.y += delta * 0.08
+
+    // Lerp (di chuyển mượt) hướng Mặt Trời về đích
+    const target = isDay ? SUN_DAY : SUN_NIGHT
+    earthUniforms.uSunDirection.value.lerp(target, delta * 1.2)
+    earthUniforms.uSunDirection.value.normalize()
   })
 
   return (
     <group>
-      {/* Lõi Trái Đất */}
       <mesh ref={earthRef}>
         <sphereGeometry args={[2, 64, 64]} />
         <shaderMaterial
@@ -75,11 +83,12 @@ export default function Earth() {
         />
       </mesh>
 
-      {/* Lớp mây */}
       <mesh ref={cloudsRef} scale={[1.012, 1.012, 1.012]}>
         <sphereGeometry args={[2, 64, 64]} />
         <meshStandardMaterial
+          map={cloudsTex}
           alphaMap={cloudsTex}
+          color="white"
           transparent
           opacity={0.6}
           depthWrite={false}
