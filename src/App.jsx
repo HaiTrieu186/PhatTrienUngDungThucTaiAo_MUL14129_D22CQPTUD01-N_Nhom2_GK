@@ -1,22 +1,23 @@
 import { Suspense, useState, useRef, useEffect } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { OrbitControls, Stars, useTexture } from '@react-three/drei'
+import { OrbitControls, useTexture } from '@react-three/drei' 
 import { XR, createXRStore, XROrigin } from '@react-three/xr'
 import * as THREE from 'three'
 import Earth from './Earth'
 import Atmosphere from './Atmosphere'
 import Sun from './Sun'
+import Moon from './Moon'           
+import StarField from './StarField' 
 
 // Khởi tạo WebXR store quản lý trạng thái VR
 const xrStore = createXRStore()
 
-// [FIX #1] Preload tất cả texture ngay khi module được import,
-// TRƯỚC khi component mount. Đảm bảo Quest Browser có đủ thời gian
-// fetch ảnh qua HTTPS trước khi WebXR session bắt đầu.
+// [FIX #1] Preload tất cả texture trước khi component mount
 useTexture.preload('/textures/day.jpg')
 useTexture.preload('/textures/night.jpg')
 useTexture.preload('/textures/clouds.jpg')
 useTexture.preload('/textures/sun.jpg')
+useTexture.preload('/textures/moon_color.jpg') // MỚI
 
 const SEASONS = [
   { key: 'spring', label: '🌸 Xuân', color: '#a8e063', border: '#6abf4b' },
@@ -29,7 +30,6 @@ const DEFAULT_CAM    = new THREE.Vector3(0, 0, 6)
 const DEFAULT_TARGET = new THREE.Vector3(0, 0, 0)
 
 // ─── TƯƠNG TÁC VR (VR CONTROLS) ─────────────────────────────────────────────
-// Xử lý input từ tay cầm Meta Quest
 function VRControls({ worldRef, vrZoomRef }) {
   useFrame(({ gl }, delta) => {
     const session = gl.xr.getSession()
@@ -37,26 +37,24 @@ function VRControls({ worldRef, vrZoomRef }) {
 
     for (const source of session.inputSources) {
       if (!source.gamepad) continue
-      const axes = source.gamepad.axes
-      const stickX = axes[2] ?? 0
-      const stickY = axes[3] ?? 0
-      const DEAD_ZONE = 0.12 // Bỏ qua vi sai nhẹ của joystick
+      const axes    = source.gamepad.axes
+      const stickX  = axes[2] ?? 0
+      const stickY  = axes[3] ?? 0
+      const DEAD_ZONE = 0.12
 
-      // Tay trái: Orbit (xoay) toàn bộ hệ thống mô phỏng
       if (source.handedness === 'left' && worldRef.current) {
         if (Math.abs(stickX) > DEAD_ZONE) worldRef.current.rotation.y -= stickX * delta * 1.4
         if (Math.abs(stickY) > DEAD_ZONE) worldRef.current.rotation.x -= stickY * delta * 1.0
-        // Giới hạn góc ngẩng để không lật ngược camera
-        worldRef.current.rotation.x = THREE.MathUtils.clamp(worldRef.current.rotation.x, -Math.PI / 2, Math.PI / 2)
+        worldRef.current.rotation.x = THREE.MathUtils.clamp(
+          worldRef.current.rotation.x, -Math.PI / 2, Math.PI / 2
+        )
       }
 
-      // Tay phải: Zoom (Dịch chuyển cụm camera rig theo trục Z)
       if (source.handedness === 'right' && vrZoomRef.current) {
         if (Math.abs(stickY) > DEAD_ZONE) {
           vrZoomRef.current.position.z = THREE.MathUtils.clamp(
             vrZoomRef.current.position.z + stickY * delta * 3,
-            -4, // Zoom in tối đa
-             4  // Zoom out tối đa
+            -4, 4
           )
         }
       }
@@ -66,11 +64,10 @@ function VRControls({ worldRef, vrZoomRef }) {
 }
 
 // ─── CAMERA RESETTER ─────────────────────────────────────────────────────────
-// Đưa camera và góc xoay về trạng thái mặc định bằng nội suy mượt (Lerp)
 function CameraResetter({ triggerRef, cancelRef, worldRef, vrZoomRef }) {
-  const { camera } = useThree()
-  const isResetting = useRef(false)
-  const orbitRef    = useRef()
+  const { camera }    = useThree()
+  const isResetting   = useRef(false)
+  const orbitRef      = useRef()
 
   triggerRef.current = (controls) => {
     orbitRef.current    = controls
@@ -107,31 +104,28 @@ function CameraResetter({ triggerRef, cancelRef, worldRef, vrZoomRef }) {
 }
 
 // ─── THEO DÕI TRẠNG THÁI VR ──────────────────────────────────────────────────
-// Lắng nghe sự kiện phần cứng để đồng bộ state của React với trạng thái WebXR
 function VRTracker({ setIsVR }) {
   const { gl } = useThree()
 
   useEffect(() => {
     const handleSessionStart = () => setIsVR(true)
-    const handleSessionEnd = () => setIsVR(false)
-
-    // Lắng nghe WebXR API native events để ẩn/hiện UI 2D
+    const handleSessionEnd   = () => setIsVR(false)
     gl.xr.addEventListener('sessionstart', handleSessionStart)
-    gl.xr.addEventListener('sessionend', handleSessionEnd)
-
+    gl.xr.addEventListener('sessionend',   handleSessionEnd)
     return () => {
       gl.xr.removeEventListener('sessionstart', handleSessionStart)
-      gl.xr.removeEventListener('sessionend', handleSessionEnd)
+      gl.xr.removeEventListener('sessionend',   handleSessionEnd)
     }
   }, [gl, setIsVR])
 
   return null
 }
 
+// ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [speed,  setSpeed]  = useState(1)
   const [season, setSeason] = useState('summer')
-  const [isVR, setIsVR]     = useState(false) // Trạng thái kiểm soát UI Web
+  const [isVR,   setIsVR]   = useState(false)
 
   const orbitRef   = useRef()
   const triggerRef = useRef(() => {})
@@ -139,12 +133,10 @@ export default function App() {
   const worldRef   = useRef()
   const vrZoomRef  = useRef()
 
-  // Lưu trữ vị trí thực tế của Mặt trời để truyền cho Shader Trái Đất
   const sunWorldPosRef = useRef(new THREE.Vector3(0, 0, -18))
 
-  const handleReset = () => triggerRef.current(orbitRef.current)
-
-  const handleEnterVR = async () => {
+  const handleReset    = () => triggerRef.current(orbitRef.current)
+  const handleEnterVR  = async () => {
     if (!navigator.xr) {
       alert('Trình duyệt không hỗ trợ WebXR. Vui lòng mở bằng Meta Quest Browser.')
       return
@@ -157,9 +149,10 @@ export default function App() {
     xrStore.enterVR()
   }
 
-  // UI Web (Lớp Overlay) - Sẽ ẩn đi khi người dùng đeo kính vào chế độ VR
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#000' }}>
+
+      {/* ─── UI OVERLAY (ẩn khi vào VR) ─── */}
       {!isVR && (
         <div style={{
           position: 'absolute', bottom: '32px', left: '50%', transform: 'translateX(-50%)',
@@ -180,7 +173,7 @@ export default function App() {
             ))}
           </div>
 
-          {/* Cụm nút điều khiển */}
+          {/* Nút điều khiển */}
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <button onClick={handleReset} style={{
                padding: '14px 28px', fontSize: '15px', fontWeight: 'bold', borderRadius: '50px',
@@ -210,40 +203,57 @@ export default function App() {
         </div>
       )}
 
-      {/* ─── KHÔNG GIAN 3D (CANVAS) ─── */}
-      {/* [FIX #5] outputColorSpace + NoToneMapping: Quest không tự ý điều chỉnh màu làm trắng cảnh. */}
+      {/* ─── 3D CANVAS ─── */}
       <Canvas
         camera={{ position: [0, 0, 6], fov: 45 }}
         gl={{ outputColorSpace: THREE.SRGBColorSpace, toneMapping: THREE.NoToneMapping }}
       >
-        {/* Tracker theo dõi trạng thái kính VR */}
         <VRTracker setIsVR={setIsVR} />
-        
+
         <XR store={xrStore}>
-          {/* Cụm gốc VR: Quản lý vị trí người chơi */}
           <group ref={vrZoomRef}>
             <XROrigin position={[0, 0, 6]} />
           </group>
 
-          <VRControls worldRef={worldRef} vrZoomRef={vrZoomRef} />
-          <CameraResetter triggerRef={triggerRef} cancelRef={cancelRef} worldRef={worldRef} vrZoomRef={vrZoomRef} />
+          <VRControls    worldRef={worldRef} vrZoomRef={vrZoomRef} />
+          <CameraResetter
+            triggerRef={triggerRef} cancelRef={cancelRef}
+            worldRef={worldRef}     vrZoomRef={vrZoomRef}
+          />
 
-          {/* Cụm không gian thế giới: Xoay toàn cục khi dùng thumbstick trái */}
+          {/* Cụm thế giới (xoay toàn bộ hệ thống khi dùng thumbstick trái) */}
           <group ref={worldRef}>
             <ambientLight intensity={0.15} />
+
+            {/* Mặt Trời */}
             <Sun season={season} sunWorldPosRef={sunWorldPosRef} />
 
             <Suspense fallback={null}>
-              {/* Trục Trái Đất nghiêng ~23.5 độ so với mặt phẳng quỹ đạo */}
+              {/* ── MẶT TRĂNG (MỚI) ── */}
+              {/* Quỹ đạo độc lập, không bị ảnh hưởng bởi độ nghiêng 23.5° của Trái Đất */}
+              <Moon sunWorldPosRef={sunWorldPosRef} />
+
+              {/* ── TRÁI ĐẤT + KHÍ QUYỂN ── */}
+              {/* Trục nghiêng 23.5° so với mặt phẳng quỹ đạo */}
               <group rotation={[0, 0, THREE.MathUtils.degToRad(-23.5)]}>
                 <Earth speed={speed} season={season} sunWorldPosRef={sunWorldPosRef} />
-                <Atmosphere />
+                {/* Atmosphere nhận sunWorldPosRef để tính toán sáng/tối hai bán cầu */}
+                <Atmosphere sunWorldPosRef={sunWorldPosRef} />
               </group>
             </Suspense>
-            <Stars radius={100} depth={50} count={6000} factor={4} saturation={0} fade />
+
+            {/* ── BẦU TRỜI SAO (MỚI) ── */}
+            {/* Thay thế drei <Stars> bằng spectral starfield tùy chỉnh */}
+            <StarField />
           </group>
 
-          <OrbitControls ref={orbitRef} enablePan={false} minDistance={3} maxDistance={12} onStart={() => cancelRef.current()} />
+          <OrbitControls
+            ref={orbitRef}
+            enablePan={false}
+            minDistance={3}
+            maxDistance={12}
+            onStart={() => cancelRef.current()}
+          />
         </XR>
       </Canvas>
     </div>
