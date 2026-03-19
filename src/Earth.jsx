@@ -3,8 +3,12 @@ import { useFrame } from '@react-three/fiber'
 import { useTexture, Text, Billboard } from '@react-three/drei'
 import * as THREE from 'three'
 
-// Shader tính toán vertex
+// [FIX #2] Thêm precision highp float vào vertex shader.
+// Tọa độ normal truyền sang fragment shader cần độ chính xác cao để
+// hàm dot() tính góc chiếu sáng không bị làm tròn sai trên GPU di động.
 const earthVertex = `
+  precision highp float;
+
   varying vec2 vUv;
   varying vec3 vNormal;
   void main() {
@@ -14,9 +18,13 @@ const earthVertex = `
   }
 `
 
-// Shader xử lý pha trộn bản đồ Ngày/Đêm dựa vào ánh sáng
+// [FIX #2] Thêm precision highp float + highp sampler2D vào fragment shader.
+// smoothstep() và mix() với mediump (16-bit) có thể sinh NaN trên Adreno GPU,
+// làm toàn bộ bề mặt Trái Đất hiển thị màu trắng/xám trên Quest 3.
 const earthFragment = `
-  precision mediump float;
+  precision highp float;
+  precision highp sampler2D;
+
   uniform sampler2D uDayTexture;
   uniform sampler2D uNightTexture;
   uniform vec3 uSunDirection;
@@ -26,31 +34,24 @@ const earthFragment = `
   void main() {
     vec3 dayColor   = texture2D(uDayTexture, vUv).rgb;
     vec3 nightColor = texture2D(uNightTexture, vUv).rgb;
-    
+
     vec3 normal  = normalize(vNormal);
     vec3 sunDir  = normalize(uSunDirection);
 
-    // Tính góc chiếu sáng (Tích vô hướng giữa pháp tuyến bề mặt và hướng nắng)
-    // > 0: Ban ngày | < 0: Ban đêm
     float sunOrientation = dot(normal, sunDir);
-    
-    // Smoothstep tạo vùng chuyển tiếp mượt mà giữa ngày và đêm
+
     float dayMix = smoothstep(-0.25, 0.25, sunOrientation);
 
-    // Tính toán dải màu chạng vạng (Hoàng hôn/Bình minh) ở ranh giới
     float twilight = smoothstep(-0.25, 0.25, sunOrientation) - smoothstep(0.0, 0.5, sunOrientation);
     vec3 twilightColor = vec3(1.0, 0.4, 0.1) * twilight * 0.6;
 
-    // Tăng độ sáng cho ánh đèn thành phố ban đêm
     vec3 boostedNight = nightColor * 2.8 + vec3(0.03, 0.03, 0.05);
-    
-    // Xuất màu cuối cùng
+
     vec3 finalColor = mix(boostedNight, dayColor, dayMix) + twilightColor;
     gl_FragColor = vec4(finalColor, 1.0);
   }
 `
 
-// Chuyển đổi tọa độ Địa lý (Vĩ độ, Kinh độ) sang không gian 3D (Cartesian)
 function latLonToXYZ(lat, lon, r) {
   const phi   = (90 - lat) * (Math.PI / 180)
   const theta = (lon + 180) * (Math.PI / 180)
@@ -63,10 +64,9 @@ function latLonToXYZ(lat, lon, r) {
 
 const CONTINENTS = [
   { name: 'Bắc Mỹ', lat: 60, lon: -100 }, { name: 'Châu Âu', lat: 52, lon: 15 },
-  { name: 'Đông Nam Á', lat: 5, lon: 115 }, // ... Thêm các châu lục khác vào đây
+  { name: 'Đông Nam Á', lat: 5, lon: 115 },
 ]
 
-// Component hiển thị tên Châu lục tương tác được
 function ContinentLabel({ name, lat, lon }) {
   const [hovered, setHovered] = useState(false)
   const hitPos  = useMemo(() => latLonToXYZ(lat, lon, 2.08), [lat, lon])
@@ -97,7 +97,7 @@ export default function Earth({ speed = 1, sunWorldPosRef }) {
   dayTex.colorSpace   = THREE.SRGBColorSpace
   nightTex.colorSpace = THREE.SRGBColorSpace
 
-  const localSunDir = useRef(new THREE.Vector3())
+  const localSunDir   = useRef(new THREE.Vector3())
   const earthWorldPos = useRef(new THREE.Vector3())
 
   const earthUniforms = useMemo(() => ({
@@ -107,12 +107,9 @@ export default function Earth({ speed = 1, sunWorldPosRef }) {
   }), [dayTex, nightTex])
 
   useFrame((_, delta) => {
-    // Trái Đất tự quay quanh trục
     if (earthGroupRef.current) earthGroupRef.current.rotation.y += delta * 0.05 * speed
-    // Mây trôi nhanh hơn bề mặt một chút tạo hiệu ứng thị giác
     if (cloudsRef.current)     cloudsRef.current.rotation.y     += delta * 0.08 * speed
 
-    // Cập nhật hướng ánh sáng liên tục để Shader xử lý ngày/đêm chính xác trong VR
     if (earthGroupRef.current && sunWorldPosRef?.current) {
       earthGroupRef.current.getWorldPosition(earthWorldPos.current)
       localSunDir.current.subVectors(sunWorldPosRef.current, earthWorldPos.current).normalize()
@@ -131,10 +128,19 @@ export default function Earth({ speed = 1, sunWorldPosRef }) {
         {CONTINENTS.map(c => <ContinentLabel key={c.name} {...c} />)}
       </group>
 
-      {/* Lớp mây với alphaMap */}
+      {/* [FIX #4] Lớp mây: thêm opacity có điều kiện.
+          Nếu cloudsTex chưa load xong (do CORS hoặc mạng chậm), opacity = 0
+          thay vì = 1 như mặc định — tránh quả cầu trắng đục che kín Trái Đất. */}
       <mesh ref={cloudsRef} scale={[1.012, 1.012, 1.012]}>
         <sphereGeometry args={[2, 64, 64]} />
-        <meshStandardMaterial map={cloudsTex} alphaMap={cloudsTex} color="white" transparent opacity={0.6} depthWrite={false} />
+        <meshStandardMaterial
+          map={cloudsTex}
+          alphaMap={cloudsTex}
+          color="white"
+          transparent={true}
+          opacity={cloudsTex ? 0.6 : 0.0}
+          depthWrite={false}
+        />
       </mesh>
     </group>
   )
