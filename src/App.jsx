@@ -1,6 +1,6 @@
 import { Suspense, useState, useRef, useEffect } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { OrbitControls, Stars } from '@react-three/drei'
+import { OrbitControls, Stars, useTexture } from '@react-three/drei'
 import { XR, createXRStore, XROrigin } from '@react-three/xr'
 import * as THREE from 'three'
 import Earth from './Earth'
@@ -9,6 +9,14 @@ import Sun from './Sun'
 
 // Khởi tạo WebXR store quản lý trạng thái VR
 const xrStore = createXRStore()
+
+// [FIX #1] Preload tất cả texture ngay khi module được import,
+// TRƯỚC khi component mount. Đảm bảo Quest Browser có đủ thời gian
+// fetch ảnh qua HTTPS trước khi WebXR session bắt đầu.
+useTexture.preload('/textures/day.jpg')
+useTexture.preload('/textures/night.jpg')
+useTexture.preload('/textures/clouds.jpg')
+useTexture.preload('/textures/sun.jpg')
 
 const SEASONS = [
   { key: 'spring', label: '🌸 Xuân', color: '#a8e063', border: '#6abf4b' },
@@ -203,7 +211,11 @@ export default function App() {
       )}
 
       {/* ─── KHÔNG GIAN 3D (CANVAS) ─── */}
-      <Canvas camera={{ position: [0, 0, 6], fov: 45 }}>
+      {/* [FIX #5] outputColorSpace + NoToneMapping: Quest không tự ý điều chỉnh màu làm trắng cảnh. */}
+      <Canvas
+        camera={{ position: [0, 0, 6], fov: 45 }}
+        gl={{ outputColorSpace: THREE.SRGBColorSpace, toneMapping: THREE.NoToneMapping }}
+      >
         {/* Tracker theo dõi trạng thái kính VR */}
         <VRTracker setIsVR={setIsVR} />
         
