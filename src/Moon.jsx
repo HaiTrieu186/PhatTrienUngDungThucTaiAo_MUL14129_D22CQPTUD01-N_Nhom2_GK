@@ -3,9 +3,11 @@ import { useFrame } from '@react-three/fiber'
 import { useTexture } from '@react-three/drei'
 import * as THREE from 'three'
 
-const MOON_ORBIT_RADIUS = 8.0   // Khoảng cách Mặt Trăng - Trái Đất (scene units)
-const MOON_ORBIT_SPEED  = 0.07  // rad/s → ~1 vòng quỹ đạo / 90 giây thực (demo)
-const MOON_RADIUS       = 0.54  // ~27% bán kính Trái Đất (r=2) → chân thực về tỉ lệ
+const MOON_ORBIT_RADIUS = 8.0
+// Tỉ lệ thực: Earth quay 1 vòng/ngày, Moon quay 1 vòng/27.3 ngày
+// Earth base speed = 0.05 rad/s → Moon = 0.05 / 27.3
+const MOON_BASE_SPEED   = 0.05 / 27.3
+const MOON_RADIUS       = 0.54
 
 // ── Vertex Shader ──────────────────────────────────────────────────────────────
 // World-space normals để đồng bộ với sun direction (không cần worldToLocal)
@@ -55,7 +57,7 @@ const moonFragment = /* glsl */`
 `
 
 // ─────────────────────────────────────────────────────────────────────────────
-export default function Moon({ sunWorldPosRef }) {
+export default function Moon({ sunWorldPosRef, speed = 1 }) {
   const groupRef = useRef()
   const angleRef = useRef(1.2) // Offset để Mặt Trăng hiện ra ngay từ đầu
 
@@ -72,7 +74,8 @@ export default function Moon({ sunWorldPosRef }) {
   }), [colorTex])
 
   useFrame((_, delta) => {
-    angleRef.current += delta * MOON_ORBIT_SPEED
+    // Tốc độ quỹ đạo tỉ lệ với speed (giống Earth)
+    angleRef.current += delta * MOON_BASE_SPEED * speed
 
     if (groupRef.current) {
       const a = angleRef.current

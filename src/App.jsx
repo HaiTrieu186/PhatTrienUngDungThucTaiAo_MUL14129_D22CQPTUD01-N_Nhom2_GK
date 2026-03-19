@@ -1,23 +1,21 @@
 import { Suspense, useState, useRef, useEffect } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { OrbitControls, useTexture } from '@react-three/drei' 
+import { OrbitControls, useTexture } from '@react-three/drei'
 import { XR, createXRStore, XROrigin } from '@react-three/xr'
 import * as THREE from 'three'
 import Earth from './Earth'
 import Atmosphere from './Atmosphere'
 import Sun from './Sun'
-import Moon from './Moon'           
-import StarField from './StarField' 
+import Moon from './Moon'
+import StarField from './StarField'
 
-// Khởi tạo WebXR store quản lý trạng thái VR
 const xrStore = createXRStore()
 
-// [FIX #1] Preload tất cả texture trước khi component mount
 useTexture.preload('/textures/day.jpg')
 useTexture.preload('/textures/night.jpg')
 useTexture.preload('/textures/clouds.jpg')
 useTexture.preload('/textures/sun.jpg')
-useTexture.preload('/textures/moon_color.jpg') // MỚI
+useTexture.preload('/textures/moon_color.jpg')
 
 const SEASONS = [
   { key: 'spring', label: '🌸 Xuân', color: '#a8e063', border: '#6abf4b' },
@@ -29,32 +27,25 @@ const SEASONS = [
 const DEFAULT_CAM    = new THREE.Vector3(0, 0, 6)
 const DEFAULT_TARGET = new THREE.Vector3(0, 0, 0)
 
-// ─── TƯƠNG TÁC VR (VR CONTROLS) ─────────────────────────────────────────────
 function VRControls({ worldRef, vrZoomRef }) {
   useFrame(({ gl }, delta) => {
     const session = gl.xr.getSession()
     if (!session) return
-
     for (const source of session.inputSources) {
       if (!source.gamepad) continue
-      const axes    = source.gamepad.axes
-      const stickX  = axes[2] ?? 0
-      const stickY  = axes[3] ?? 0
+      const axes = source.gamepad.axes
+      const stickX = axes[2] ?? 0
+      const stickY = axes[3] ?? 0
       const DEAD_ZONE = 0.12
-
       if (source.handedness === 'left' && worldRef.current) {
         if (Math.abs(stickX) > DEAD_ZONE) worldRef.current.rotation.y -= stickX * delta * 1.4
         if (Math.abs(stickY) > DEAD_ZONE) worldRef.current.rotation.x -= stickY * delta * 1.0
-        worldRef.current.rotation.x = THREE.MathUtils.clamp(
-          worldRef.current.rotation.x, -Math.PI / 2, Math.PI / 2
-        )
+        worldRef.current.rotation.x = THREE.MathUtils.clamp(worldRef.current.rotation.x, -Math.PI / 2, Math.PI / 2)
       }
-
       if (source.handedness === 'right' && vrZoomRef.current) {
         if (Math.abs(stickY) > DEAD_ZONE) {
           vrZoomRef.current.position.z = THREE.MathUtils.clamp(
-            vrZoomRef.current.position.z + stickY * delta * 3,
-            -4, 4
+            vrZoomRef.current.position.z + stickY * delta * 3, -4, 4
           )
         }
       }
@@ -63,65 +54,44 @@ function VRControls({ worldRef, vrZoomRef }) {
   return null
 }
 
-// ─── CAMERA RESETTER ─────────────────────────────────────────────────────────
 function CameraResetter({ triggerRef, cancelRef, worldRef, vrZoomRef }) {
-  const { camera }    = useThree()
-  const isResetting   = useRef(false)
-  const orbitRef      = useRef()
+  const { camera } = useThree()
+  const isResetting = useRef(false)
+  const orbitRef    = useRef()
 
-  triggerRef.current = (controls) => {
-    orbitRef.current    = controls
-    isResetting.current = true
-  }
-  cancelRef.current = () => { isResetting.current = false }
+  triggerRef.current = (controls) => { orbitRef.current = controls; isResetting.current = true }
+  cancelRef.current  = () => { isResetting.current = false }
 
   useFrame((_, delta) => {
     if (!isResetting.current) return
-
     camera.position.lerp(DEFAULT_CAM, delta * 1.5)
-    if (orbitRef.current) {
-      orbitRef.current.target.lerp(DEFAULT_TARGET, delta * 1.5)
-      orbitRef.current.update()
-    }
+    if (orbitRef.current) { orbitRef.current.target.lerp(DEFAULT_TARGET, delta * 1.5); orbitRef.current.update() }
     if (worldRef?.current) {
       worldRef.current.rotation.x = THREE.MathUtils.lerp(worldRef.current.rotation.x, 0, delta * 1.5)
       worldRef.current.rotation.y = THREE.MathUtils.lerp(worldRef.current.rotation.y, 0, delta * 1.5)
     }
-    if (vrZoomRef?.current) {
-      vrZoomRef.current.position.z = THREE.MathUtils.lerp(vrZoomRef.current.position.z, 0, delta * 1.5)
-    }
-
+    if (vrZoomRef?.current) vrZoomRef.current.position.z = THREE.MathUtils.lerp(vrZoomRef.current.position.z, 0, delta * 1.5)
     if (camera.position.distanceTo(DEFAULT_CAM) < 0.01) {
       camera.position.copy(DEFAULT_CAM)
-      if (orbitRef.current) {
-        orbitRef.current.target.copy(DEFAULT_TARGET)
-        orbitRef.current.update()
-      }
+      if (orbitRef.current) { orbitRef.current.target.copy(DEFAULT_TARGET); orbitRef.current.update() }
       isResetting.current = false
     }
   })
   return null
 }
 
-// ─── THEO DÕI TRẠNG THÁI VR ──────────────────────────────────────────────────
 function VRTracker({ setIsVR }) {
   const { gl } = useThree()
-
   useEffect(() => {
-    const handleSessionStart = () => setIsVR(true)
-    const handleSessionEnd   = () => setIsVR(false)
-    gl.xr.addEventListener('sessionstart', handleSessionStart)
-    gl.xr.addEventListener('sessionend',   handleSessionEnd)
-    return () => {
-      gl.xr.removeEventListener('sessionstart', handleSessionStart)
-      gl.xr.removeEventListener('sessionend',   handleSessionEnd)
-    }
+    const onStart = () => setIsVR(true)
+    const onEnd   = () => setIsVR(false)
+    gl.xr.addEventListener('sessionstart', onStart)
+    gl.xr.addEventListener('sessionend',   onEnd)
+    return () => { gl.xr.removeEventListener('sessionstart', onStart); gl.xr.removeEventListener('sessionend', onEnd) }
   }, [gl, setIsVR])
-
   return null
 }
 
-// ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [speed,  setSpeed]  = useState(1)
   const [season, setSeason] = useState('summer')
@@ -135,30 +105,13 @@ export default function App() {
 
   const sunWorldPosRef = useRef(new THREE.Vector3(0, 0, -18))
 
-  const handleReset    = () => triggerRef.current(orbitRef.current)
-  const handleEnterVR  = async () => {
-    if (!navigator.xr) {
-      alert('Trình duyệt không hỗ trợ WebXR. Vui lòng mở bằng Meta Quest Browser.')
-      return
-    }
-    const supported = await navigator.xr.isSessionSupported('immersive-vr')
-    if (!supported) {
-      alert('Thiết bị không hỗ trợ Immersive VR.')
-      return
-    }
-    xrStore.enterVR()
-  }
-
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#000' }}>
-
-      {/* ─── UI OVERLAY (ẩn khi vào VR) ─── */}
       {!isVR && (
         <div style={{
           position: 'absolute', bottom: '32px', left: '50%', transform: 'translateX(-50%)',
           zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px',
         }}>
-          {/* Bộ chọn mùa */}
           <div style={{ display: 'flex', gap: '8px' }}>
             {SEASONS.map(s => (
               <button key={s.key} onClick={() => setSeason(s.key)} style={{
@@ -167,83 +120,63 @@ export default function App() {
                 color: season === s.key ? '#fff' : '#888',
                 border: `2px solid ${season === s.key ? s.border : '#333'}`,
                 borderRadius: '20px', cursor: 'pointer', transition: 'all 0.3s ease',
-              }}>
-                {s.label}
-              </button>
+              }}>{s.label}</button>
             ))}
           </div>
-
-          {/* Nút điều khiển */}
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-            <button onClick={handleReset} style={{
-               padding: '14px 28px', fontSize: '15px', fontWeight: 'bold', borderRadius: '50px',
-               background: '#16213e', color: '#a0c4ff', border: '2px solid #a0c4ff', cursor: 'pointer',
-            }}>
-              🎯 Reset Góc Nhìn
-            </button>
-            <button onClick={handleEnterVR} style={{
-               padding: '14px 28px', fontSize: '15px', fontWeight: 'bold', borderRadius: '50px',
-               background: '#2d1060', color: '#d4aaff', border: '2px solid #9b59f5', cursor: 'pointer',
-            }}>
-              🥽 Vào VR (Quest 3)
-            </button>
+            <button onClick={() => triggerRef.current(orbitRef.current)} style={{
+              padding: '14px 28px', fontSize: '15px', fontWeight: 'bold', borderRadius: '50px',
+              background: '#16213e', color: '#a0c4ff', border: '2px solid #a0c4ff', cursor: 'pointer',
+            }}>🎯 Reset Góc Nhìn</button>
+            <button onClick={async () => {
+              if (!navigator.xr) { alert('Trình duyệt không hỗ trợ WebXR.'); return }
+              const ok = await navigator.xr.isSessionSupported('immersive-vr')
+              if (!ok) { alert('Thiết bị không hỗ trợ Immersive VR.'); return }
+              xrStore.enterVR()
+            }} style={{
+              padding: '14px 28px', fontSize: '15px', fontWeight: 'bold', borderRadius: '50px',
+              background: '#2d1060', color: '#d4aaff', border: '2px solid #9b59f5', cursor: 'pointer',
+            }}>🥽 Vào VR (Quest 3)</button>
           </div>
-
-          {/* Thanh trượt tốc độ */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(0,0,0,0.55)',
             padding: '8px 18px', borderRadius: '20px', backdropFilter: 'blur(6px)',
           }}>
             <span style={{ color: '#aaa', fontSize: '13px' }}>🌍 Tốc độ quay</span>
             <input type="range" min="0" max="5" step="0.1" value={speed}
-              onChange={e => setSpeed(parseFloat(e.target.value))} style={{ width: '120px' }}
-            />
+              onChange={e => setSpeed(parseFloat(e.target.value))} style={{ width: '120px' }} />
             <span style={{ color: '#fff', fontSize: '13px', fontWeight: 'bold' }}>{speed.toFixed(1)}×</span>
           </div>
         </div>
       )}
 
-      {/* ─── 3D CANVAS ─── */}
       <Canvas
         camera={{ position: [0, 0, 6], fov: 45 }}
         gl={{ outputColorSpace: THREE.SRGBColorSpace, toneMapping: THREE.NoToneMapping }}
       >
         <VRTracker setIsVR={setIsVR} />
-
         <XR store={xrStore}>
           <group ref={vrZoomRef}>
             <XROrigin position={[0, 0, 6]} />
           </group>
+          <VRControls worldRef={worldRef} vrZoomRef={vrZoomRef} />
+          <CameraResetter triggerRef={triggerRef} cancelRef={cancelRef} worldRef={worldRef} vrZoomRef={vrZoomRef} />
 
-          <VRControls    worldRef={worldRef} vrZoomRef={vrZoomRef} />
-          <CameraResetter
-            triggerRef={triggerRef} cancelRef={cancelRef}
-            worldRef={worldRef}     vrZoomRef={vrZoomRef}
-          />
-
-          {/* Cụm thế giới (xoay toàn bộ hệ thống khi dùng thumbstick trái) */}
           <group ref={worldRef}>
-            <ambientLight intensity={0.15} />
-
-            {/* Mặt Trời */}
+            <ambientLight intensity={0.12} />
             <Sun season={season} sunWorldPosRef={sunWorldPosRef} />
 
             <Suspense fallback={null}>
-              {/* ── MẶT TRĂNG (MỚI) ── */}
-              {/* Quỹ đạo độc lập, không bị ảnh hưởng bởi độ nghiêng 23.5° của Trái Đất */}
-              <Moon sunWorldPosRef={sunWorldPosRef} />
+              {/* Moon orbit độc lập, tốc độ tỉ lệ với speed */}
+              <Moon sunWorldPosRef={sunWorldPosRef} speed={speed} />
 
-              {/* ── TRÁI ĐẤT + KHÍ QUYỂN ── */}
-              {/* Trục nghiêng 23.5° so với mặt phẳng quỹ đạo */}
+              {/* Trái Đất nghiêng 23.5° */}
               <group rotation={[0, 0, THREE.MathUtils.degToRad(-23.5)]}>
-                <Earth speed={speed} season={season} sunWorldPosRef={sunWorldPosRef} />
-                {/* Atmosphere nhận sunWorldPosRef để tính toán sáng/tối hai bán cầu */}
+                <Earth speed={speed} sunWorldPosRef={sunWorldPosRef} />
                 <Atmosphere sunWorldPosRef={sunWorldPosRef} />
               </group>
             </Suspense>
 
-            {/* ── BẦU TRỜI SAO (MỚI) ── */}
-            {/* Thay thế drei <Stars> bằng spectral starfield tùy chỉnh */}
             <StarField />
           </group>
 
