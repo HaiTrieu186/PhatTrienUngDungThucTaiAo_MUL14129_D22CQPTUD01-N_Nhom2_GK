@@ -2,7 +2,8 @@ import { useRef, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
-const STAR_COUNT = 8000
+// Tăng lên 12000 – vẫn rất mượt trên Quest 3 (chỉ là points, rất nhẹ)
+const STAR_COUNT = 12000
 
 // Spectral class colors (approximate blackbody RGB for Quest 3 display)
 // Weighted toward real stellar population (M-dwarfs dominate the galaxy)
@@ -16,7 +17,6 @@ const SPECTRAL_CLASSES = [
   { color: [1.00, 0.78, 0.42], weight: 0.769  }, // M – Red-orange (phổ biến nhất)
 ]
 
-// Pre-compute cumulative weights for O(1) weighted selection
 const CUM_WEIGHTS = SPECTRAL_CLASSES.reduce((acc, cls, i) => {
   acc.push((acc[i - 1] ?? 0) + cls.weight)
   return acc
@@ -34,7 +34,6 @@ export default function StarField() {
   const pointsRef = useRef()
   const uniforms  = useMemo(() => ({ uTime: { value: 0 } }), [])
 
-  // Generate all star data once (useMemo → runs once, stays in memory)
   const { positions, aColors, aSizes } = useMemo(() => {
     const positions = new Float32Array(STAR_COUNT * 3)
     const aColors   = new Float32Array(STAR_COUNT * 3)
@@ -45,7 +44,7 @@ export default function StarField() {
       const u = Math.random() * 2 - 1
       const t = Math.random() * 2 * Math.PI
       const s = Math.sqrt(1 - u * u)
-      const r = 175 + Math.random() * 25 // Slight depth variation for realism
+      const r = 175 + Math.random() * 25
 
       positions[i * 3]     = r * s * Math.cos(t)
       positions[i * 3 + 1] = r * u
@@ -56,19 +55,17 @@ export default function StarField() {
       aColors[i * 3 + 1] = cls.color[1]
       aColors[i * 3 + 2] = cls.color[2]
 
-      // Magnitude distribution: exponential falloff (phần lớn sao yếu)
       const mag = Math.random()
-      aSizes[i] = mag < 0.003 ? 3.5 + Math.random() * 2.5 // Rất sáng (rất hiếm)
-               :  mag < 0.04  ? 1.4 + Math.random() * 1.4 // Sáng
-               :  mag < 0.20  ? 0.7 + Math.random() * 0.6 // Vừa
-               :                0.3 + Math.random() * 0.4  // Mờ (đa số)
+      aSizes[i] = mag < 0.003 ? 3.5 + Math.random() * 2.5
+               :  mag < 0.04  ? 1.4 + Math.random() * 1.4
+               :  mag < 0.20  ? 0.7 + Math.random() * 0.6
+               :                0.3 + Math.random() * 0.4
     }
     return { positions, aColors, aSizes }
   }, [])
 
   useFrame(({ clock }) => { uniforms.uTime.value = clock.elapsedTime })
 
-  // ── Vertex Shader ──────────────────────────────────────────────────────────
   const vertexShader = /* glsl */`
     precision highp float;
     attribute vec3  aColor;
@@ -86,15 +83,17 @@ export default function StarField() {
       float seed  = dot(position, vec3(127.1, 311.7, 74.7));
       float freq  = 0.4 + fract(sin(seed)       * 43758.5453) * 2.2;
       float phase = fract(cos(seed * 3.7)        * 43758.5453) * 6.28318;
-      vTwinkle = 0.87 + 0.13 * sin(uTime * freq + phase);
+
+      // Tăng biên độ nhấp nháy: 0.87+0.13 → 0.82+0.18
+      // Sao nhấp nháy rõ hơn, tự nhiên hơn nhưng không gây khó chịu VR
+      vTwinkle = 0.82 + 0.18 * sin(uTime * freq + phase);
 
       vec4 mvPos   = modelViewMatrix * vec4(position, 1.0);
-      gl_PointSize = aSize * (260.0 / -mvPos.z); // Perspective attenuation
+      gl_PointSize = aSize * (260.0 / -mvPos.z);
       gl_Position  = projectionMatrix * mvPos;
     }
   `
 
-  // ── Fragment Shader ────────────────────────────────────────────────────────
   const fragmentShader = /* glsl */`
     precision mediump float;
     varying vec3  vColor;
@@ -105,7 +104,6 @@ export default function StarField() {
       float d  = dot(uv, uv);
       if (d > 1.0) discard;
 
-      // Soft glow: bright center, fades to transparent
       float alpha = (1.0 - smoothstep(0.15, 1.0, d)) * vTwinkle;
       gl_FragColor = vec4(vColor * vTwinkle, alpha);
     }

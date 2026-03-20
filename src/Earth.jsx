@@ -110,35 +110,36 @@ function latLonToXYZ(lat, lon, r) {
 
 const CONTINENTS = [
   // Châu Mỹ
-  { name: 'Bắc Mỹ',        lat:  60,  lon: -100 },
-  { name: 'Trung Mỹ',      lat:  15,  lon:  -85 },
-  { name: 'Nam Mỹ',        lat: -15,  lon:  -55 },
-
+  { name: 'Bắc Mỹ',         lat:  52,  lon: -105 }, // Canada/Prairies
+  { name: 'Trung Mỹ',       lat:  14,  lon:  -87 }, // Honduras
+  { name: 'Nam Mỹ',         lat: -12,  lon:  -53 }, // Brazil trung tâm
+ 
   // Châu Âu
-  { name: 'Châu Âu',       lat:  52,  lon:   15 },
-
+  { name: 'Châu Âu',        lat:  50,  lon:   10 }, // Đức/Trung Âu
+ 
   // Trung Đông
-  { name: 'Trung Đông',    lat:  28,  lon:   45 },
-
+  { name: 'Trung Đông',     lat:  26,  lon:   44 }, // Arabia
+ 
   // Châu Á
-  { name: 'Bắc Á',         lat:  65,  lon:  100 },
-  { name: 'Trung Á',       lat:  45,  lon:   65 },
-  { name: 'Nam Á',         lat:  20,  lon:   78 },
-  { name: 'Đông Á',        lat:  35,  lon:  115 },
-  { name: 'Đông Nam Á',    lat:   5,  lon:  115 },
-
+  { name: 'Bắc Á (Siberia)',lat:  62,  lon:  105 }, // Siberia
+  { name: 'Trung Á',        lat:  43,  lon:   63 }, // Kazakhstan
+  { name: 'Nam Á',          lat:  22,  lon:   80 }, // India
+  { name: 'Đông Á',         lat:  36,  lon:  116 }, // China
+  { name: 'Đông Nam Á',     lat:   3,  lon:  113 }, // Borneo
+ 
   // Châu Phi
-  { name: 'Bắc Phi',       lat:  25,  lon:   20 },
-  { name: 'Trung Phi',     lat:   0,  lon:   22 },
-  { name: 'Nam Phi',       lat: -28,  lon:   25 },
-
+  { name: 'Bắc Phi',        lat:  22,  lon:   17 }, // Libya/Niger
+  { name: 'Trung Phi',      lat:   2,  lon:   24 }, // Congo
+  { name: 'Nam Phi',        lat: -29,  lon:   26 }, // Nam Phi
+ 
   // Châu Đại Dương
-  { name: 'Châu Đại Dương', lat: -25, lon:  135 },
-
-  // Cực
-  { name: 'Bắc Cực',       lat:  88,  lon:    0 },
-  { name: 'Nam Cực',       lat: -88,  lon:    0 },
+  { name: 'Châu Đại Dương', lat: -24,  lon:  134 }, // Australia trung tâm
+ 
+  // Cực (hit sphere nhỏ hơn một chút – tránh chồng lên nhau)
+  { name: 'Bắc Cực',        lat:  85,  lon:    0 },
+  { name: 'Nam Cực',        lat: -85,  lon:    0 },
 ]
+
 
 function ContinentLabel({ name, lat, lon }) {
   const [hovered, setHovered] = useState(false)

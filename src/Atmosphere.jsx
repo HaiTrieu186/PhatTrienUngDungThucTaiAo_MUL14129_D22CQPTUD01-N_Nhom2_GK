@@ -23,9 +23,9 @@ const atmosFragment = /* glsl */`
     vec3  viewDir = normalize(cameraPosition - vWorldPos);
     vec3  N       = normalize(vNormal);
 
-    // Fresnel rim
+    // Fresnel rim - Đã giảm số mũ xuống 3.5 để quầng sáng khí quyển dày và mềm hơn
     float base    = 0.5 - dot(N, viewDir);
-    float fresnel = pow(clamp(base, 0.0, 1.0), 5.0);
+    float fresnel = pow(clamp(base, 0.0, 1.0), 3.5);
 
     // Sun-aware brightness
     float sunDot    = dot(N, normalize(uSunDirection));
@@ -62,10 +62,8 @@ export default function Atmosphere({ sunWorldPosRef }) {
   return (
     <mesh
       ref={meshRef}
-      scale={[1.15, 1.15, 1.15]}
-      // ── FIX QUAN TRỌNG: tắt raycast để pointer event xuyên qua ──────────
-      // Atmosphere bao phủ toàn bộ (r=2.3) nên nếu không tắt sẽ chặn
-      // tất cả pointer events của continent hit spheres bên trong
+      // Đã tăng scale lên 1.18 để khí quyển trông bao phủ rộng hơn một chút
+      scale={[1.18, 1.18, 1.18]}
       raycast={() => {}}
     >
       <sphereGeometry args={[2, 64, 64]} />
