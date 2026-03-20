@@ -109,9 +109,35 @@ function latLonToXYZ(lat, lon, r) {
 }
 
 const CONTINENTS = [
-  { name: 'Bắc Mỹ',     lat: 48, lon: -100 },
-  { name: 'Châu Âu',    lat: 50, lon:   15 },
-  { name: 'Đông Nam Á', lat:  8, lon:  115 },
+  // Châu Mỹ
+  { name: 'Bắc Mỹ',        lat:  60,  lon: -100 },
+  { name: 'Trung Mỹ',      lat:  15,  lon:  -85 },
+  { name: 'Nam Mỹ',        lat: -15,  lon:  -55 },
+
+  // Châu Âu
+  { name: 'Châu Âu',       lat:  52,  lon:   15 },
+
+  // Trung Đông
+  { name: 'Trung Đông',    lat:  28,  lon:   45 },
+
+  // Châu Á
+  { name: 'Bắc Á',         lat:  65,  lon:  100 },
+  { name: 'Trung Á',       lat:  45,  lon:   65 },
+  { name: 'Nam Á',         lat:  20,  lon:   78 },
+  { name: 'Đông Á',        lat:  35,  lon:  115 },
+  { name: 'Đông Nam Á',    lat:   5,  lon:  115 },
+
+  // Châu Phi
+  { name: 'Bắc Phi',       lat:  25,  lon:   20 },
+  { name: 'Trung Phi',     lat:   0,  lon:   22 },
+  { name: 'Nam Phi',       lat: -28,  lon:   25 },
+
+  // Châu Đại Dương
+  { name: 'Châu Đại Dương', lat: -25, lon:  135 },
+
+  // Cực
+  { name: 'Bắc Cực',       lat:  88,  lon:    0 },
+  { name: 'Nam Cực',       lat: -88,  lon:    0 },
 ]
 
 function ContinentLabel({ name, lat, lon }) {
