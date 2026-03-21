@@ -152,30 +152,65 @@ function useAnamorphicTex() {
 //
 // Không có threshold cứng, không có smoothstep giả tạo — tất cả là toán học thực.
 // ─────────────────────────────────────────────────────────────────────────────
-const _toSun   = new THREE.Vector3()
-const _toEarth = new THREE.Vector3()
+// Reusable vectors – tránh tạo object mới mỗi frame
+const _camPos  = new THREE.Vector3()
+const _camDir  = new THREE.Vector3()
+const _sunDir  = new THREE.Vector3()
+const _ocVec   = new THREE.Vector3()
+const _pSun    = new THREE.Vector3()
+const _pCenter = new THREE.Vector3()
 
+// ── Lấy camera position + direction đúng cho Web và VR ────────────────────────
+// Web:  camera thường từ useThree() → getWorldPosition/Direction bình thường
+// VR:   ArrayCamera.getWorldDirection() trả về (0,0,-1) mặc định vì không có
+//       head-tracking rotation riêng. Phải dùng cameras[0] (left eye sub-camera)
+//       mới có matrixWorld được WebXR cập nhật theo head pose thực tế mỗi frame.
+function getActiveCamVectors(camera, gl, outPos, outDir) {
+  if (gl.xr.isPresenting) {
+    const xrCam = gl.xr.getCamera()
+    xrCam.getWorldPosition(outPos)
+    // cameras[0] = left eye, có head-tracking rotation đúng
+    const eyeCam = xrCam.cameras?.length > 0 ? xrCam.cameras[0] : xrCam
+    eyeCam.getWorldDirection(outDir)
+  } else {
+    camera.getWorldPosition(outPos)
+    camera.getWorldDirection(outDir)
+  }
+}
+
+// ── Tính tỉ lệ đĩa Mặt Trời KHÔNG bị đĩa Trái Đất che ────────────────────────
+// BƯỚC 1 – Ray-sphere test: đảm bảo Earth thực sự nằm GIỮA camera và Sun.
+//   Nếu camera đứng giữa Earth và Sun (Earth phía sau lưng), angular radius
+//   Earth rất lớn (gần) → sẽ tính sai "che hết" dù không che gì cả.
+//   Ray-sphere loại trừ case này trước khi vào tính angular.
+// BƯỚC 2 – Circle-circle intersection: tính diện tích giao nhau chính xác.
+//   visibility = 1 - A_giao / A_sun_disc
 function getSunVisibility(camPos, sunWorldPos) {
-  const distToSun   = camPos.distanceTo(sunWorldPos)
-  const distToEarth = camPos.length()   // Earth luôn ở (0,0,0)
+  const distToSun = camPos.distanceTo(sunWorldPos)
+  _sunDir.subVectors(sunWorldPos, camPos).normalize()
 
-  // Góc bán kính angular (radian, xấp xỉ arctan ≈ tan với góc nhỏ)
-  const r = SUN_RADIUS  / distToSun    // angular radius của đĩa Mặt Trời
-  const R = EARTH_RADIUS / distToEarth // angular radius của đĩa Trái Đất
+  // BƯỚC 1: ray-sphere test (Earth tại gốc tọa độ)
+  _ocVec.copy(camPos)
+  const b    = _ocVec.dot(_sunDir)
+  const c    = _ocVec.dot(_ocVec) - EARTH_RADIUS * EARTH_RADIUS
+  const disc = b * b - c
+  if (disc < 0) return 1.0  // ray không cắt Earth sphere
 
-  // Hướng từ camera đến Sun và đến Earth
-  _toSun.subVectors(sunWorldPos, camPos).normalize()
-  _toEarth.copy(camPos).negate().normalize()  // hướng từ cam về (0,0,0)
+  const sqrtD = Math.sqrt(disc)
+  const tNear = -b - sqrtD
+  const tFar  = -b + sqrtD
+  // Earth hoàn toàn sau lưng camera, hoặc ở xa hơn Sun
+  if (tFar <= 0 || tNear >= distToSun) return 1.0
 
-  // Earth phải nằm GIỮA camera và Sun mới che được
-  // Kiểm tra: proj của Earth-vector lên Sun-direction phải dương
-  // Nếu âm → Earth ở phía sau camera → không che gì cả
-  const earthProj = _toEarth.dot(_toSun)
-  if (earthProj <= 0) return 1.0
+  // BƯỚC 2: circle-circle intersection
+  const distToEarth = camPos.length()
+  const r = SUN_RADIUS   / distToSun
+  const R = EARTH_RADIUS / distToEarth
 
-  // Góc phân cách angular giữa 2 tâm (d)
-  const cosAngle = THREE.MathUtils.clamp(_toSun.dot(_toEarth), -1, 1)
-  const d        = Math.acos(cosAngle)
+  // Hướng từ camera → Earth tâm = (0,0,0)
+  const toEarthDir = _ocVec.clone().negate().normalize()
+  const cosAngle   = THREE.MathUtils.clamp(_sunDir.dot(toEarthDir), -1, 1)
+  const d          = Math.acos(cosAngle)
 
   // Trường hợp đặc biệt: không giao nhau → Sun hoàn toàn lộ
   if (d >= r + R) return 1.0
@@ -229,7 +264,7 @@ const sunFragment = `
 `
 
 export default function Sun({ season, sunWorldPosRef }) {
-  const { camera } = useThree()
+  const { camera, gl } = useThree()
   const groupRef       = useRef()
   const coronaRef      = useRef()
   const flareGroupRef  = useRef()
@@ -261,19 +296,37 @@ export default function Sun({ season, sunWorldPosRef }) {
 
     if (!sunWorldPosRef?.current) return
 
-    const camPos = new THREE.Vector3()
-    camera.getWorldPosition(camPos)
-    const camDir = new THREE.Vector3()
-    camera.getWorldDirection(camDir)
-    const sunDir = new THREE.Vector3().subVectors(sunWorldPosRef.current, camPos).normalize()
-    const dot    = camDir.dot(sunDir)
+    // Lấy camera pos + dir đúng cho cả Web và VR (xem getActiveCamVectors)
+    getActiveCamVectors(camera, gl, _camPos, _camDir)
+    const sunDir = _sunDir.subVectors(sunWorldPosRef.current, _camPos).normalize()
+    const dot    = _camDir.dot(sunDir)
 
-    // Tỉ lệ đĩa Mặt Trời không bị Trái Đất che (0.0 → 1.0, vật lý chính xác)
-    const visibility = getSunVisibility(camPos, sunWorldPosRef.current)
+    const visibility = getSunVisibility(_camPos, sunWorldPosRef.current)
 
     const DISTANCE = 220.0
-    const pSun    = camPos.clone().add(sunDir.clone().multiplyScalar(DISTANCE))
-    const pCenter = camPos.clone().add(camDir.clone().multiplyScalar(DISTANCE))
+    _pSun.copy(_camPos).addScaledVector(sunDir, DISTANCE)
+    _pCenter.copy(_camPos).addScaledVector(_camDir, DISTANCE)
+
+    // ── QUAN TRỌNG: Convert world space → local space của worldRef ────────────
+    //
+    // Sơ đồ cây:  worldRef  →  Sun root group  →  flareGroupRef  →  sprites
+    //
+    // Khi worldRef xoay (VR left-stick controls), tất cả con của nó xoay theo.
+    // sprite.position = tọa độ LOCAL trong worldRef, KHÔNG phải world space.
+    //
+    // Ví dụ lỗi: worldRef xoay 90°, _pSun = [0,0,-220] (world)
+    //   → sprite.position = [0,0,-220] local → world pos = [220,0,0] ← SAI HƯỚNG!
+    //
+    // Fix: lSun = worldRef.worldToLocal(_pSun) = tọa độ local tương ứng world _pSun
+    //   → sprite xuất hiện đúng vị trí Mặt Trời trên màn hình VR.
+    //
+    // sprite.lookAt(_camPos) vẫn dùng world space — Three.js tự undo parent
+    // transform bên trong lookAt() nên không cần convert. ✓
+    //
+    // worldRef = flareGroupRef.parent (Sun root group) .parent (worldRef)
+    const worldRefGrp = flareGroupRef.current?.parent?.parent
+    const lSun    = worldRefGrp ? worldRefGrp.worldToLocal(_pSun.clone())    : _pSun
+    const lCenter = worldRefGrp ? worldRefGrp.worldToLocal(_pCenter.clone()) : _pCenter
 
     // Ghost flares — intensity tỉ lệ chính xác với phần Sun còn lộ ra
     if (flareGroupRef.current) {
@@ -282,8 +335,8 @@ export default function Sun({ season, sunWorldPosRef }) {
         flareGroupRef.current.visible = true
         flareGroupRef.current.children.forEach(s => {
           s.material.opacity = fi * s.userData.baseOpacity
-          s.position.copy(pSun).lerp(pCenter, s.userData.factor)
-          s.lookAt(camPos)
+          s.position.copy(lSun).lerp(lCenter, s.userData.factor)
+          s.lookAt(_camPos)
         })
       } else {
         flareGroupRef.current.visible = false
@@ -297,8 +350,8 @@ export default function Sun({ season, sunWorldPosRef }) {
         streakGroupRef.current.visible = true
         streakGroupRef.current.children.forEach(s => {
           s.material.opacity = si * s.userData.baseOpacity
-          s.position.copy(pSun)
-          s.lookAt(camPos)
+          s.position.copy(lSun)
+          s.lookAt(_camPos)
         })
       } else {
         streakGroupRef.current.visible = false
