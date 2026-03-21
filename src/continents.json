@@ -97,6 +97,20 @@
       "area": 8486460,
       "population": 46088716,
       "fact": "Nhiều quốc đảo đang đứng trước nguy cơ biến mất do nước biển dâng."
+    },
+    {
+      "name": "Bắc Cực",
+      "lat": 88, "lon": 0,
+      "area": 14500000,
+      "population": 4000000,
+      "fact": "Nơi có lớp băng vĩnh cửu đang tan chảy nhanh gấp 4 lần mức trung bình toàn cầu."
+    },
+    {
+      "name": "Nam Cực",
+      "lat": -88, "lon": 0,
+      "area": 14200000,
+      "population": 5000,
+      "fact": "Lục địa lạnh nhất, khô nhất và chứa 70% lượng nước ngọt của toàn thế giới."
     }
   ]
 }

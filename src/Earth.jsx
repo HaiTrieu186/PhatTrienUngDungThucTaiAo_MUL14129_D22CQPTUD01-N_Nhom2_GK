@@ -110,9 +110,10 @@ function ContinentLabel({ name, lat, lon, area, population, fact, activeId, setA
   const isSelected = activeId === name
   const [hovered, setHovered] = useState(false)
 
+  // Cải tiến: Tăng bán kính namePos và cardPos lên một chút để tránh lún ở 2 đầu cực (lat 88/-88)
   const hitPos = useMemo(() => latLonToXYZ(lat, lon, 2.05), [lat, lon])
-  const namePos = useMemo(() => latLonToXYZ(lat, lon, 2.5), [lat, lon]) 
-  const cardPos = useMemo(() => latLonToXYZ(lat, lon, 3.2), [lat, lon])
+  const namePos = useMemo(() => latLonToXYZ(lat, lon, 2.6), [lat, lon]) 
+  const cardPos = useMemo(() => latLonToXYZ(lat, lon, 3.4), [lat, lon])
 
   const factLines = useMemo(() => {
     if (!fact) return []
@@ -138,7 +139,7 @@ function ContinentLabel({ name, lat, lon, area, population, fact, activeId, setA
           setActiveId(isSelected ? null : name) 
         }}
       >
-        <sphereGeometry args={[0.4, 8, 8]} />
+        <sphereGeometry args={[0.45, 8, 8]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
