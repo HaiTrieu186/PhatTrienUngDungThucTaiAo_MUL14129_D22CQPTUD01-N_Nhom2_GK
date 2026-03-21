@@ -103,7 +103,9 @@ export default function App() {
   const worldRef   = useRef()
   const vrZoomRef  = useRef()
 
-  const sunWorldPosRef = useRef(new THREE.Vector3(0, 0, -18))
+  const sunWorldPosRef  = useRef(new THREE.Vector3(0, 0, -18))
+  // ref để Moon xuất vị trí ra, Earth đọc vào để tính bóng ──────────
+  const moonWorldPosRef = useRef(new THREE.Vector3(0, 8, 0))
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#000' }}>
@@ -167,12 +169,12 @@ export default function App() {
             <Sun season={season} sunWorldPosRef={sunWorldPosRef} />
 
             <Suspense fallback={null}>
-              {/* Moon orbit độc lập, tốc độ tỉ lệ với speed */}
-              <Moon sunWorldPosRef={sunWorldPosRef} speed={speed} />
+              {/* moonWorldPosRef: Moon ghi vào, Earth đọc ra để tính bóng nguyệt thực */}
+              <Moon sunWorldPosRef={sunWorldPosRef} speed={speed} moonWorldPosRef={moonWorldPosRef} />
 
               {/* Trái Đất nghiêng 23.5° */}
               <group rotation={[0, 0, THREE.MathUtils.degToRad(-23.5)]}>
-                <Earth speed={speed} sunWorldPosRef={sunWorldPosRef} />
+                <Earth speed={speed} sunWorldPosRef={sunWorldPosRef} moonWorldPosRef={moonWorldPosRef} />
                 <Atmosphere sunWorldPosRef={sunWorldPosRef} />
               </group>
             </Suspense>
