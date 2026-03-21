@@ -16,6 +16,7 @@ useTexture.preload('/textures/night.jpg')
 useTexture.preload('/textures/clouds.jpg')
 useTexture.preload('/textures/sun.jpg')
 useTexture.preload('/textures/moon_color.jpg')
+useTexture.preload('/textures/milkyway.jpg')
 
 const SEASONS = [
   { key: 'spring', label: '🌸 Xuân', color: '#a8e063', border: '#6abf4b' },
@@ -26,6 +27,25 @@ const SEASONS = [
 
 const DEFAULT_CAM    = new THREE.Vector3(0, 0, 6)
 const DEFAULT_TARGET = new THREE.Vector3(0, 0, 0)
+
+// depthWrite={false}: không ghi depth buffer → tránh che các object phía trước
+// side={THREE.BackSide}: render mặt trong của sphere → camera nhìn vào từ bên trong
+function MilkyWayBackground() {
+  const tex = useTexture('/textures/milky_way.jpg')
+  // Không set colorSpace để giữ màu tối tự nhiên, không bị gamma brighten
+  return (
+    <mesh renderOrder={-1}>
+      <sphereGeometry args={[155, 32, 32]} />
+      <meshBasicMaterial
+        map={tex}
+        side={THREE.BackSide}
+        opacity={0.18}
+        transparent
+        depthWrite={false}
+      />
+    </mesh>
+  )
+}
 
 function VRControls({ worldRef, vrZoomRef }) {
   useFrame(({ gl }, delta) => {
@@ -179,6 +199,9 @@ export default function App() {
               </group>
             </Suspense>
 
+            <Suspense fallback={null}>
+              <MilkyWayBackground />
+            </Suspense>
             <StarField />
           </group>
 
