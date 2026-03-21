@@ -2,161 +2,95 @@ import { useRef, useMemo, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useTexture, Text, Billboard } from '@react-three/drei'
 import * as THREE from 'three'
+import geoData from './continents.json'
 
-// ── Vertex shader dùng chung cho cả Earth mesh lẫn Cloud mesh ────────────────
+// ── Vertex Shader ──
 const earthVertex = /* glsl */`
   precision highp float;
   varying vec2 vUv;
   varying vec3 vNormal;
   varying vec3 vWorldPos;
-
   void main() {
-    vUv       = uv;
+    vUv = uv;
     vec4 wPos = modelMatrix * vec4(position, 1.0);
     vWorldPos = wPos.xyz;
-    vNormal   = normalize(mat3(modelMatrix) * normal);
+    vNormal = normalize(mat3(modelMatrix) * normal);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `
 
-// ── Earth Fragment Shader ─────────────────────────────────────────────────────
-// Thay đổi so với bản gốc:
-//   - Bỏ uCloudsTexture (cloud đã tách ra CloudLayer riêng)
-//   - Thêm uMoonWorldPos + tính bóng nguyệt thực bằng ray-sphere intersection
+// ── Earth Shader ──
 const earthFragment = /* glsl */`
   precision highp float;
-
   uniform sampler2D uDayTexture;
   uniform sampler2D uNightTexture;
-  uniform vec3      uSunDirection;
-  uniform vec3      uMoonWorldPos;   // MỚI: vị trí world của Mặt Trăng
-
+  uniform vec3 uSunDirection;
+  uniform vec3 uMoonWorldPos;
   varying vec2 vUv;
   varying vec3 vNormal;
   varying vec3 vWorldPos;
-
   void main() {
-    vec3  day   = texture2D(uDayTexture,   vUv).rgb;
-    vec3  night = texture2D(uNightTexture, vUv).rgb;
-
-    vec3  N = normalize(vNormal);
-    vec3  L = normalize(uSunDirection);
-    vec3  V = normalize(cameraPosition - vWorldPos);
-    float d = dot(N, L); // -1 đêm → +1 trưa
-
-    // ── 1. Day/Night blend ──────────────────────────────────────────────────
+    vec3 day = texture2D(uDayTexture, vUv).rgb;
+    vec3 night = texture2D(uNightTexture, vUv).rgb;
+    vec3 N = normalize(vNormal);
+    vec3 L = normalize(uSunDirection);
+    vec3 V = normalize(cameraPosition - vWorldPos);
+    float d = dot(N, L);
     float dayMix = smoothstep(-0.10, 0.40, d);
-
-    // ── 2. Lambert diffuse ──────────────────────────────────────────────────
     float diffuse = max(0.0, d);
-    float warmth  = smoothstep(0.0, 1.0, diffuse) * 0.06;
-    vec3  dayLit  = day * (diffuse + 0.04);
-    dayLit = mix(dayLit, dayLit * vec3(1.04, 1.01, 0.97), warmth);
-
-    // ── 3. Đèn thành phố đêm ───────────────────────────────────────────────
+    vec3 dayLit = day * (diffuse + 0.04);
     float nightVis = clamp(-d * 2.5, 0.0, 1.0) * (1.0 - dayMix);
-    vec3  cityLit  = night * 2.6 + vec3(0.012, 0.012, 0.025);
-
-    // ── 4. Ocean specular ───────────────────────────────────────────────────
-    vec3  R      = reflect(-L, N);
-    float spec   = pow(max(0.0, dot(R, V)), 150.0);
-    float lum    = dot(day, vec3(0.299, 0.587, 0.114));
-    float ocean  = clamp((0.48 - lum) * 3.0, 0.0, 1.0);
-    float specOn = smoothstep(0.25, 0.65, diffuse);
-    vec3  specC  = vec3(0.75, 0.88, 1.0) * spec * ocean * specOn * 0.40;
-
-    // ── 5. Surface composite ────────────────────────────────────────────────
+    vec3 cityLit = night * 2.6 + vec3(0.012, 0.012, 0.025);
+    vec3 R = reflect(-L, N);
+    float spec = pow(max(0.0, dot(R, V)), 150.0);
+    float lum = dot(day, vec3(0.299, 0.587, 0.114));
+    float ocean = clamp((0.48 - lum) * 3.0, 0.0, 1.0);
+    vec3 specC = vec3(0.75, 0.88, 1.0) * spec * ocean * smoothstep(0.25, 0.65, diffuse) * 0.40;
     vec3 surface = mix(cityLit, dayLit, dayMix) + specC;
-
-    // ── 6. Bóng Mặt Trăng (Nguyệt thực) ────────────────────────────────────
-    // Phương pháp: ray-sphere intersection
-    // - Ray xuất phát từ vWorldPos theo hướng Mặt Trời (uSunDirection)
-    // - Kiểm tra ray này có đi qua hình cầu Mặt Trăng không
-    // - Nếu có → pixel đang bị che bởi Mặt Trăng → tối đi
-    // Không cần VSM hay shadow map → 0 draw call thêm → an toàn VR
     float moonShadow = 0.0;
     {
-      vec3  sunDir_n = normalize(uSunDirection);
-
-      // Vector từ surface point đến tâm Mặt Trăng
-      vec3  toMoon = uMoonWorldPos - vWorldPos;
-
-      // Chiếu toMoon lên trục Mặt Trời
-      // proj > 0 nghĩa là Mặt Trăng nằm về phía Mặt Trời (có thể che)
-      float proj = dot(toMoon, sunDir_n);
-
+      vec3 toMoon = uMoonWorldPos - vWorldPos;
+      float proj = dot(toMoon, normalize(uSunDirection));
       if (proj > 0.1) {
-        // Khoảng cách vuông góc từ tâm Mặt Trăng đến ray Mặt Trời
-        vec3  perpVec  = toMoon - sunDir_n * proj;
-        float perpDist = length(perpVec);
-
-        float mR = 0.54; // MOON_RADIUS – khớp với Moon.jsx
-
-        // Vùng bóng tối (umbra) mềm dần ra vùng nửa tối (penumbra)
-        // smoothstep(mR*1.6, mR*0.25, perpDist):
-        //   perpDist > mR*1.6 → shadow = 0  (bên ngoài bóng hoàn toàn)
-        //   perpDist < mR*0.25 → shadow = 1 (trong umbra đen đặc)
-        //   khoảng giữa       → gradient mềm (penumbra)
-        float rawShadow = smoothstep(mR * 1.6, mR * 0.25, perpDist);
-
-        // Chỉ áp dụng bóng trên mặt được chiếu sáng (tránh double-dark ở night side)
-        moonShadow = rawShadow * smoothstep(0.0, 0.25, d);
+        float perpDist = length(toMoon - normalize(uSunDirection) * proj);
+        moonShadow = smoothstep(0.54 * 1.6, 0.54 * 0.25, perpDist) * smoothstep(0.0, 0.25, d);
       }
     }
-
-    // ── 7. Final composite ──────────────────────────────────────────────────
-    vec3 final = surface * (1.0 - moonShadow * 0.90);
-    gl_FragColor = vec4(final, 1.0);
+    gl_FragColor = vec4(surface * (1.0 - moonShadow * 0.90), 1.0);
   }
 `
 
-// ── Cloud Layer Fragment Shader ───────────────────────────────────────────────
-// Tách hoàn toàn khỏi Earth shader để cloud có:
-//   - Chiều sâu riêng (parallax effect khi xoay góc nhìn)
-//   - Vận tốc xoay riêng (gió toàn cầu)
-//   - Hiệu ứng tán xạ Rayleigh ở terminator (màu cam bình minh/hoàng hôn)
+// ── Cloud Shader (Mây đêm sáng & rõ) ──
 const cloudFragment = /* glsl */`
   precision highp float;
-
   uniform sampler2D uCloudsTexture;
-  uniform vec3      uSunDirection;
-
+  uniform vec3 uSunDirection;
   varying vec2 vUv;
   varying vec3 vNormal;
-  varying vec3 vWorldPos; // khai báo cho khớp với vertex shader, không dùng
-
   void main() {
     float cloud = texture2D(uCloudsTexture, vUv).r;
-
-    // Bỏ qua fragment hoàn toàn trong suốt → tiết kiệm GPU (quan trọng trên Quest 3)
     if (cloud < 0.012) discard;
 
-    vec3  N = normalize(vNormal);
-    vec3  L = normalize(uSunDirection);
+    vec3 N = normalize(vNormal);
+    vec3 L = normalize(uSunDirection);
     float d = dot(N, L);
 
-    // Chiếu sáng mây độc lập với Earth
-    float cloudLit = smoothstep(-0.05, 0.40, d);
+    float cloudLit = smoothstep(-0.1, 0.40, d);
+    float twi = max(0.0, smoothstep(-0.25, 0.05, d) - smoothstep(0.05, 0.4, d));
 
-    // Tán xạ Rayleigh: mây nhuốm cam đỏ ở vùng bình minh/hoàng hôn gần terminator
-    // Chỉ xuất hiện trong dải hẹp quanh d ≈ 0 (đường ranh giới ngày/đêm)
-    float twi = max(0.0,
-      smoothstep(-0.20, 0.02, d) - smoothstep(0.02, 0.35, d)
-    );
+    vec3 cloudWhite = vec3(0.88, 0.90, 0.93);
+    vec3 cloudWarm  = vec3(0.85, 0.68, 0.48);
+    vec3 cloudNight = vec3(0.08, 0.12, 0.22); 
 
-    vec3 cloudWhite = vec3(0.88, 0.90, 0.93);   // Ban ngày: trắng lạnh tự nhiên
-    vec3 cloudWarm  = vec3(0.85, 0.68, 0.48);   // Terminator: cam nhạt (chỉ trên mây)
-    vec3 cloudDark  = vec3(0.018, 0.018, 0.022);// Ban đêm: đen đặc
+    vec3 cloudColor = mix(cloudNight, mix(cloudWhite, cloudWarm, twi), cloudLit);
+    float finalAlpha = cloud * mix(0.48, 0.78, cloudLit);
 
-    vec3 cloudColor = mix(cloudDark, mix(cloudWhite, cloudWarm, twi * 0.55), cloudLit);
-
-    gl_FragColor = vec4(cloudColor, cloud * 0.78);
+    gl_FragColor = vec4(cloudColor, finalAlpha);
   }
 `
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function latLonToXYZ(lat, lon, r) {
-  const phi   = (90 - lat) * (Math.PI / 180)
+  const phi = (90 - lat) * (Math.PI / 180)
   const theta = (lon + 180) * (Math.PI / 180)
   return new THREE.Vector3(
     -r * Math.sin(phi) * Math.cos(theta),
@@ -165,174 +99,178 @@ function latLonToXYZ(lat, lon, r) {
   )
 }
 
-const CONTINENTS = [
-  // Châu Mỹ
-  { name: 'Bắc Mỹ',         lat:  52,  lon: -105 },
-  { name: 'Trung Mỹ',       lat:  14,  lon:  -87 },
-  { name: 'Nam Mỹ',         lat: -12,  lon:  -53 },
-  // Châu Âu
-  { name: 'Châu Âu',        lat:  50,  lon:   10 },
-  // Trung Đông
-  { name: 'Trung Đông',     lat:  26,  lon:   44 },
-  // Châu Á
-  { name: 'Bắc Á (Siberia)',lat:  62,  lon:  105 },
-  { name: 'Trung Á',        lat:  43,  lon:   63 },
-  { name: 'Nam Á',          lat:  22,  lon:   80 },
-  { name: 'Đông Á',         lat:  36,  lon:  116 },
-  { name: 'Đông Nam Á',     lat:   3,  lon:  113 },
-  // Châu Phi
-  { name: 'Bắc Phi',        lat:  22,  lon:   17 },
-  { name: 'Trung Phi',      lat:   2,  lon:   24 },
-  { name: 'Nam Phi',        lat: -29,  lon:   26 },
-  // Châu Đại Dương
-  { name: 'Châu Đại Dương', lat: -24,  lon:  134 },
-  // Cực
-  { name: 'Bắc Cực',        lat:  85,  lon:    0 },
-  { name: 'Nam Cực',        lat: -85,  lon:    0 },
-]
+function formatNum(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + ' tỷ'
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + ' triệu'
+  return n.toLocaleString()
+}
 
-function ContinentLabel({ name, lat, lon }) {
+// ── Continent Label Component ──
+function ContinentLabel({ name, lat, lon, area, population, fact, activeId, setActiveId }) {
+  const isSelected = activeId === name
   const [hovered, setHovered] = useState(false)
-  const hitPos  = useMemo(() => latLonToXYZ(lat, lon, 2.35), [lat, lon])
-  const textPos = useMemo(() => latLonToXYZ(lat, lon, 2.75), [lat, lon])
+
+  const hitPos = useMemo(() => latLonToXYZ(lat, lon, 2.05), [lat, lon])
+  const namePos = useMemo(() => latLonToXYZ(lat, lon, 2.5), [lat, lon]) 
+  const cardPos = useMemo(() => latLonToXYZ(lat, lon, 3.2), [lat, lon])
+
+  const factLines = useMemo(() => {
+    if (!fact) return []
+    const words = fact.split(' ')
+    const lines = []
+    let currentLine = ''
+    words.forEach(word => {
+      if ((currentLine + word).length > 35) { lines.push(currentLine.trim()); currentLine = word + ' ' }
+      else { currentLine += word + ' ' }
+    })
+    lines.push(currentLine.trim()); return lines
+  }, [fact])
 
   return (
     <group>
-      <mesh
+      {/* UX SNAPPING: Mesh tàng hình rộng (0.4) để dễ click trong VR */}
+      <mesh 
         position={hitPos}
-        onPointerOver={e => { e.stopPropagation(); setHovered(true)  }}
-        onPointerOut={e  => { e.stopPropagation(); setHovered(false) }}
+        onPointerOver={(e) => { e.stopPropagation(); setHovered(true) }}
+        onPointerOut={(e) => { e.stopPropagation(); setHovered(false) }}
+        onClick={(e) => { 
+          e.stopPropagation() 
+          setActiveId(isSelected ? null : name) 
+        }}
       >
-        <sphereGeometry args={[0.35, 8, 8]} />
-        <meshBasicMaterial color="white" visible={false} />
+        <sphereGeometry args={[0.4, 8, 8]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      {hovered && (
-        <Billboard position={textPos} follow={true}>
-          <Text fontSize={0.15} color="#ffffff" outlineWidth={0.01} outlineColor="#000000"
-            anchorX="center" anchorY="middle">
-            {name}
+
+      {/* HUD Reticle hiện tại tâm pin khi hover vùng snapping */}
+      {hovered && !isSelected && (
+        <Billboard position={hitPos} follow>
+          <Text position={[-0.15, 0.15, 0.01]} fontSize={0.1} color="#facc15">[</Text>
+          <Text position={[0.15, 0.15, 0.01]} fontSize={0.1} color="#facc15">]</Text>
+          <Text position={[-0.15, -0.15, 0.01]} fontSize={0.1} color="#facc15">[</Text>
+          <Text position={[0.15, -0.15, 0.01]} fontSize={0.1} color="#facc15">]</Text>
+        </Billboard>
+      )}
+
+      {/* Tên lục địa khi hover */}
+      {hovered && !isSelected && (
+        <Billboard position={namePos} follow>
+          <Text 
+            fontSize={0.12} 
+            color="white" 
+            anchorX="center" 
+            fontWeight="bold"
+            outlineWidth={0.012}
+            outlineColor="#020617"
+          >
+            {name.toUpperCase()}
           </Text>
+        </Billboard>
+      )}
+
+      {/* Info Card */}
+      {isSelected && (
+        <Billboard position={cardPos} follow>
+          <mesh>
+            <planeGeometry args={[1.8, 0.9 + factLines.length * 0.08]} />
+            <meshBasicMaterial color="#020617" transparent opacity={0.85} depthWrite={false} />
+          </mesh>
+          <mesh position={[0, 0, -0.01]}>
+            <planeGeometry args={[1.84, 0.94 + factLines.length * 0.08]} />
+            <meshBasicMaterial color="#3b82f6" transparent opacity={0.3} depthWrite={false} />
+          </mesh>
+
+          <group position={[-0.8, 0.35 + (factLines.length * 0.04), 0.01]}>
+            <Text fontSize={0.14} color="#facc15" anchorX="left" fontWeight="bold">{name.toUpperCase()}</Text>
+            <group position={[0, -0.2, 0]}>
+              <Text fontSize={0.06} color="#94a3b8" anchorX="left">DIỆN TÍCH</Text>
+              <Text fontSize={0.08} color="#f8fafc" position={[0, -0.07, 0]} anchorX="left">{area ? area.toLocaleString() : 'N/A'} km²</Text>
+            </group>
+            <group position={[0.9, -0.2, 0]}>
+              <Text fontSize={0.06} color="#94a3b8" anchorX="left">DÂN SỐ</Text>
+              <Text fontSize={0.08} color="#f8fafc" position={[0, -0.07, 0]} anchorX="left">{formatNum(population)}</Text>
+            </group>
+            <group position={[0, -0.45, 0]}>
+              <Text fontSize={0.06} color="#3b82f6" anchorX="left" fontStyle="italic">INFO</Text>
+              {factLines.map((line, i) => (
+                <Text key={i} fontSize={0.065} color="#cbd5e1" position={[0, -0.08 - (i * 0.08), 0]} anchorX="left">{line}</Text>
+              ))}
+            </group>
+          </group>
         </Billboard>
       )}
     </group>
   )
 }
 
-// ── Cloud Layer Component ─────────────────────────────────────────────────────
-// Hình cầu mây riêng, bán kính 2.015 (lớn hơn Earth 0.75%)
-// Lợi ích:
-//   1. Parallax effect: mây có chiều sâu khi xoay góc nhìn
-//   2. Vận tốc xoay khác Earth → mây "trôi" như gió thực tế
-//   3. Shader riêng → chiếu sáng chính xác, màu cam ở terminator
 function CloudLayer({ cloudsTex, sunWorldPosRef, speed }) {
-  const meshRef       = useRef()
+  const meshRef = useRef()
   const cloudWorldPos = useRef(new THREE.Vector3())
-  const sunDirCloud   = useRef(new THREE.Vector3())
-
   const cloudUniforms = useMemo(() => ({
     uCloudsTexture: { value: cloudsTex },
-    uSunDirection:  { value: new THREE.Vector3(0, 0, -1) },
+    uSunDirection: { value: new THREE.Vector3(0, 0, -1) },
   }), [cloudsTex])
 
   useFrame((_, delta) => {
-    // Xoay cloud mesh thêm 0.006*speed ngoài rotation của earthGroupRef
-    // Tổng tốc độ mây = 0.05 (Earth) + 0.006 = 0.056 → mây nhanh hơn ~12%
-    // Tác dụng: mây trôi chậm qua các lục địa (hiệu ứng gió toàn cầu)
     if (meshRef.current) meshRef.current.rotation.y += delta * 0.006 * speed
-
-    // Cập nhật hướng Mặt Trời độc lập cho cloud shader
     if (meshRef.current && sunWorldPosRef?.current) {
       meshRef.current.getWorldPosition(cloudWorldPos.current)
-      sunDirCloud.current
-        .subVectors(sunWorldPosRef.current, cloudWorldPos.current)
-        .normalize()
-      cloudUniforms.uSunDirection.value.copy(sunDirCloud.current)
+      cloudUniforms.uSunDirection.value.copy(
+        new THREE.Vector3().subVectors(sunWorldPosRef.current, cloudWorldPos.current).normalize()
+      )
     }
   })
 
   return (
-    // renderOrder={2}: đảm bảo cloud render SAU Earth (renderOrder=0 mặc định)
-    // depthWrite={false}: tránh z-fighting và lỗi alpha sorting
     <mesh ref={meshRef} renderOrder={2}>
       <sphereGeometry args={[2.015, 64, 64]} />
-      <shaderMaterial
-        vertexShader={earthVertex}
-        fragmentShader={cloudFragment}
-        uniforms={cloudUniforms}
-        transparent
-        depthWrite={false}
-        side={THREE.FrontSide}
-      />
+      <shaderMaterial vertexShader={earthVertex} fragmentShader={cloudFragment} uniforms={cloudUniforms} transparent depthWrite={false} />
     </mesh>
   )
 }
 
-// ── Earth Component ───────────────────────────────────────────────────────────
-// moonWorldPosRef: prop MỚI, nhận từ App.jsx để tính bóng nguyệt thực
 export default function Earth({ speed = 1, sunWorldPosRef, moonWorldPosRef }) {
   const earthGroupRef = useRef()
+  const [activeId, setActiveId] = useState(null)
 
-  // cloudsTex vẫn load ở đây nhưng truyền xuống CloudLayer thay vì earthUniforms
-  const [dayTex, nightTex, cloudsTex] = useTexture([
-    '/textures/day.jpg',
-    '/textures/night.jpg',
-    '/textures/clouds.jpg',
-  ])
-  dayTex.colorSpace   = THREE.SRGBColorSpace
-  nightTex.colorSpace = THREE.SRGBColorSpace
-  // cloudsTex KHÔNG set colorSpace vì nó là grayscale mask
+  const [dayTex, nightTex, cloudsTex] = useTexture(['/textures/day.jpg', '/textures/night.jpg', '/textures/clouds.jpg'])
+  dayTex.colorSpace = nightTex.colorSpace = THREE.SRGBColorSpace
 
-  const earthWorldPos = useRef(new THREE.Vector3())
-  const sunDirWorld   = useRef(new THREE.Vector3())
-
-  // earthUniforms: bỏ uCloudsTexture, thêm uMoonWorldPos
   const earthUniforms = useMemo(() => ({
-    uDayTexture:   { value: dayTex   },
+    uDayTexture: { value: dayTex },
     uNightTexture: { value: nightTex },
     uSunDirection: { value: new THREE.Vector3(0, 0, -1) },
-    uMoonWorldPos: { value: new THREE.Vector3(0, 8, 0)  }, // khởi tạo gần đúng
+    uMoonWorldPos: { value: new THREE.Vector3(0, 8, 0) },
   }), [dayTex, nightTex])
 
   useFrame((_, delta) => {
     if (earthGroupRef.current) earthGroupRef.current.rotation.y += delta * 0.05 * speed
-
-    // Cập nhật hướng Mặt Trời
-    if (earthGroupRef.current && sunWorldPosRef?.current) {
-      earthGroupRef.current.getWorldPosition(earthWorldPos.current)
-      sunDirWorld.current
-        .subVectors(sunWorldPosRef.current, earthWorldPos.current)
-        .normalize()
-      earthUniforms.uSunDirection.value.copy(sunDirWorld.current)
+    if (sunWorldPosRef?.current) {
+        const earthPos = new THREE.Vector3()
+        earthGroupRef.current.getWorldPosition(earthPos)
+        earthUniforms.uSunDirection.value.subVectors(sunWorldPosRef.current, earthPos).normalize()
     }
-
-    // MỚI: Cập nhật vị trí Mặt Trăng cho tính toán bóng trong shader
-    // moonWorldPosRef được Moon.jsx ghi vào mỗi frame trước khi Earth đọc
-    if (moonWorldPosRef?.current) {
-      earthUniforms.uMoonWorldPos.value.copy(moonWorldPosRef.current)
-    }
+    if (moonWorldPosRef?.current) earthUniforms.uMoonWorldPos.value.copy(moonWorldPosRef.current)
   })
 
   return (
     <group ref={earthGroupRef}>
-      {/* Earth mesh – không có cloud, có bóng Mặt Trăng */}
-      <mesh>
+      {/* Bấm vào quả đất để đóng card đang mở */}
+      <mesh onClick={() => setActiveId(null)}>
         <sphereGeometry args={[2, 64, 64]} />
-        <shaderMaterial
-          vertexShader={earthVertex}
-          fragmentShader={earthFragment}
-          uniforms={earthUniforms}
-        />
+        <shaderMaterial vertexShader={earthVertex} fragmentShader={earthFragment} uniforms={earthUniforms} />
       </mesh>
 
-      {/* Cloud mesh – tách riêng, bán kính 2.015, có parallax và drift */}
-      <CloudLayer
-        cloudsTex={cloudsTex}
-        sunWorldPosRef={sunWorldPosRef}
-        speed={speed}
-      />
-
-      {/* Continent labels – không thay đổi */}
-      {CONTINENTS.map(c => <ContinentLabel key={c.name} {...c} />)}
+      <CloudLayer cloudsTex={cloudsTex} sunWorldPosRef={sunWorldPosRef} speed={speed} />
+      
+      {geoData.regions.map(c => (
+        <ContinentLabel 
+          key={c.name} 
+          {...c} 
+          activeId={activeId} 
+          setActiveId={setActiveId} 
+        />
+      ))}
     </group>
   )
 }

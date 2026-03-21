@@ -1,0 +1,102 @@
+{
+  "regions": [
+    {
+      "name": "Bắc Mỹ",
+      "lat": 45, "lon": -100,
+      "area": 24710000,
+      "population": 595000000,
+      "fact": "Lục địa có nền kinh tế lớn nhất thế giới, trải dài từ vùng cực bắc băng giá đến các vùng nhiệt đới phía nam."
+    },
+    {
+      "name": "Trung Mỹ",
+      "lat": 18, "lon": -90,
+      "area": 2452270,
+      "population": 183409960,
+      "fact": "Cầu nối địa lý quan trọng, sở hữu điểm nóng đa dạng sinh học Mesoamerica cùng hệ thống núi lửa phức tạp."
+    },
+    {
+      "name": "Nam Mỹ",
+      "lat": -15, "lon": -60,
+      "area": 17840000,
+      "population": 435611302,
+      "fact": "Lưu vực sông Amazon chiếm hơn 20% lượng nước ngọt chảy ra đại dương mỗi ngày."
+    },
+    {
+      "name": "Châu Âu",
+      "lat": 52, "lon": 15,
+      "area": 22134900,
+      "population": 745083824,
+      "fact": "Lục địa có lịch sử văn hóa lâu đời và đang trải qua quá trình già hóa dân số nhanh."
+    },
+    {
+      "name": "Trung Đông",
+      "lat": 25, "lon": 45,
+      "area": 4805058,
+      "population": 309350818,
+      "fact": "Nơi khai sinh của ba tôn giáo lớn và có trữ lượng dầu mỏ lớn nhất thế giới."
+    },
+    {
+      "name": "Bắc Phi",
+      "lat": 24, "lon": 10,
+      "area": 7769438,
+      "population": 272131339,
+      "fact": "Sa mạc Sahara chiếm hầu hết diện tích, dân số tập trung ven Địa Trung Hải."
+    },
+    {
+      "name": "Trung Phi",
+      "lat": 0, "lon": 20,
+      "area": 6496820,
+      "population": 212915636,
+      "fact": "Rừng mưa nhiệt đới Congo là bể hấp thụ carbon lớn thứ hai thế giới."
+    },
+    {
+      "name": "Nam Phi",
+      "lat": -25, "lon": 25,
+      "area": 2650670,
+      "population": 73138701,
+      "fact": "Tiểu vùng công nghiệp hóa nhất châu Phi, giàu vàng và kim cương."
+    },
+    {
+      "name": "Bắc Á",
+      "lat": 60, "lon": 90,
+      "area": 13100000,
+      "population": 36800000,
+      "fact": "Vùng Siberia rộng lớn với hệ sinh thái đài nguyên khắc nghiệt."
+    },
+    {
+      "name": "Trung Á",
+      "lat": 45, "lon": 65,
+      "area": 3926790,
+      "population": 82225865,
+      "fact": "Khu vực lục địa nằm hoàn toàn trong đất liền lớn nhất thế giới."
+    },
+    {
+      "name": "Nam Á",
+      "lat": 20, "lon": 77,
+      "area": 6400127,
+      "population": 2064056491,
+      "fact": "Khu vực đông dân nhất hành tinh với nền văn minh Ấn-Hằng lâu đời."
+    },
+    {
+      "name": "Đông Á",
+      "lat": 35, "lon": 110,
+      "area": 11560456,
+      "population": 1656115405,
+      "fact": "Trung tâm kinh tế toàn cầu với các siêu đô thị hiện đại."
+    },
+    {
+      "name": "Đông Nam Á",
+      "lat": 5, "lon": 115,
+      "area": 4340700,
+      "population": 695149428,
+      "fact": "Khu vực có mật độ đảo cao nhất thế giới với hơn 25.000 hòn đảo."
+    },
+    {
+      "name": "Châu Đại Dương",
+      "lat": -25, "lon": 135,
+      "area": 8486460,
+      "population": 46088716,
+      "fact": "Nhiều quốc đảo đang đứng trước nguy cơ biến mất do nước biển dâng."
+    }
+  ]
+}
