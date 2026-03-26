@@ -234,8 +234,13 @@ export default function Earth({ speed = 1, sunWorldPosRef, moonWorldPosRef }) {
   const earthGroupRef = useRef()
   const [activeId, setActiveId] = useState(null)
 
-  const [dayTex, nightTex, cloudsTex] = useTexture(['/textures/day.jpg', '/textures/night.jpg', '/textures/clouds.jpg'])
-  dayTex.colorSpace = nightTex.colorSpace = THREE.SRGBColorSpace
+  const [dayTex, nightTex, cloudsTex] = useTexture([
+    '/textures/day.jpg',
+    '/textures/night.jpg',
+    '/textures/clouds.jpg'
+  ], ([d, n]) => {
+    d.colorSpace = n.colorSpace = THREE.SRGBColorSpace
+  })
 
   const earthUniforms = useMemo(() => ({
     uDayTexture: { value: dayTex },
@@ -257,7 +262,7 @@ export default function Earth({ speed = 1, sunWorldPosRef, moonWorldPosRef }) {
   return (
     <group ref={earthGroupRef}>
       {/* Bấm vào quả đất để đóng card đang mở */}
-      <mesh onClick={() => setActiveId(null)}>
+      <mesh castShadow onClick={() => setActiveId(null)}>
         <sphereGeometry args={[2, 64, 64]} />
         <shaderMaterial vertexShader={earthVertex} fragmentShader={earthFragment} uniforms={earthUniforms} />
       </mesh>

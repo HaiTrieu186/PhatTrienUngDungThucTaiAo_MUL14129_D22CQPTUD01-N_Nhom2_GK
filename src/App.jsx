@@ -1,4 +1,4 @@
-import { Suspense, useState, useRef, useEffect } from 'react'
+import { Suspense, useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, useTexture } from '@react-three/drei'
 import { XR, createXRStore, XROrigin } from '@react-three/xr'
@@ -79,8 +79,15 @@ function CameraResetter({ triggerRef, cancelRef, worldRef, vrZoomRef }) {
   const isResetting = useRef(false)
   const orbitRef    = useRef()
 
-  triggerRef.current = (controls) => { orbitRef.current = controls; isResetting.current = true }
-  cancelRef.current  = () => { isResetting.current = false }
+  useLayoutEffect(() => {
+    triggerRef.current = (controls) => {
+      orbitRef.current = controls
+      isResetting.current = true
+    }
+    cancelRef.current = () => {
+      isResetting.current = false
+    }
+  }, [triggerRef, cancelRef])
 
   useFrame((_, delta) => {
     if (!isResetting.current) return
@@ -173,6 +180,7 @@ export default function App() {
       )}
 
       <Canvas
+        shadows
         camera={{ position: [0, 0, 6], fov: 45 }}
         gl={{ outputColorSpace: THREE.SRGBColorSpace, toneMapping: THREE.NoToneMapping }}
       >

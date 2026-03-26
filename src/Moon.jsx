@@ -5,7 +5,7 @@ import * as THREE from 'three'
 
 const MOON_ORBIT_RADIUS = 8.0
 const EARTH_BASE_SPEED  = 0.05
-const MOON_BASE_SPEED   = EARTH_BASE_SPEED / 27.3
+const MOON_BASE_SPEED   = EARTH_BASE_SPEED / 5.0 // Tăng tốc độ lên (giảm chu kỳ từ 27.3 xuống 5.0)
 const MOON_RADIUS       = 0.54
 
 const moonVertex = /* glsl */`
@@ -47,6 +47,7 @@ const moonFragment = /* glsl */`
     vec3  albedo   = texture2D(uColorTex, vUv).rgb;
     vec3  N        = normalize(vNormal);
     vec3  L        = normalize(uSunDir);
+    vec3  V        = normalize(cameraPosition - vWorldPos); // Hướng nhìn từ Camera
     float cosTheta = dot(N, L);
 
     // Chiếu sáng Mặt Trời lên Mặt Trăng (sigmoid terminator)
@@ -54,6 +55,10 @@ const moonFragment = /* glsl */`
     vec3 nightColor = albedo * 0.006;
     vec3 dayColor   = albedo * max(0.0, cosTheta) * 1.05;
     vec3 moonColor  = mix(nightColor, dayColor, dayMix);
+
+    // ── Rim Light (Giúp nhận diện vị trí trong bóng tối) ────────────
+    float rim = pow(1.0 - max(0.0, dot(N, V)), 3.5);
+    vec3 rimColor = vec3(0.5, 0.7, 1.0) * rim * 0.25;
 
     // ── Bóng Trái Đất đổ lên Mặt Trăng (Nguyệt Thực) ────────────────────────
     // Trái Đất nằm tại gốc tọa độ thế giới (0,0,0), bán kính 2.0
@@ -86,7 +91,8 @@ const moonFragment = /* glsl */`
         // Umbra (bóng tối đặc): perpDist < eR * 0.85
         // Penumbra (nửa tối, fade dần): eR*0.85 → eR*1.5
         // smoothstep(high, low, x): = 1 khi x < low, = 0 khi x > high
-        earthShadow = smoothstep(eR * 1.5, eR * 0.85, perpDist);
+        // Tăng độ nhòe biên bóng (Penumbra rộng hơn từ 1.8 đến 0.7)
+        earthShadow = smoothstep(eR * 1.8, eR * 0.70, perpDist);
 
         // Chỉ tối ở những fragment Mặt Trời đang chiếu vào
         // (tránh double-dark ở mặt tối của Mặt Trăng vốn đã tối)
@@ -95,12 +101,13 @@ const moonFragment = /* glsl */`
     }
 
     // Áp dụng bóng: nhân màu xuống, giữ lại ~8% ánh sáng còn lại
-    // (Thực tế nguyệt thực toàn phần vẫn có ánh sáng đỏ cam do khúc xạ khí quyển)
     vec3 finalColor = moonColor * (1.0 - earthShadow * 0.92);
 
-    // Thêm hint màu đỏ cam nhẹ khi trong vùng penumbra (hiệu ứng ánh sáng
-    // khúc xạ qua khí quyển Trái Đất – tại sao Mặt Trăng có màu máu khi nguyệt thực)
-    finalColor = mix(finalColor, finalColor * vec3(1.4, 0.6, 0.3), earthShadow * 0.35);
+    // Hiệu ứng "Mặt Trăng Máu" mờ ảo khi vào trung tâm bóng
+    finalColor = mix(finalColor, finalColor * vec3(1.3, 0.5, 0.2), earthShadow * 0.40);
+
+    // Thêm Rim Light vào kết quả cuối cùng (luôn sáng nhẹ ở viền)
+    finalColor += rimColor;
 
     gl_FragColor = vec4(finalColor, 1.0);
   }
@@ -110,8 +117,9 @@ export default function Moon({ sunWorldPosRef, speed = 1, moonWorldPosRef }) {
   const groupRef = useRef()
   const angleRef = useRef(1.2)
 
-  const colorTex = useTexture('/textures/moon_color.jpg')
-  colorTex.colorSpace = THREE.SRGBColorSpace
+  const colorTex = useTexture('/textures/moon_color.jpg', (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace
+  })
 
   const moonWorldPos = useRef(new THREE.Vector3())
   const sunDir       = useRef(new THREE.Vector3(1, 0, 0))
@@ -156,8 +164,8 @@ export default function Moon({ sunWorldPosRef, speed = 1, moonWorldPosRef }) {
 
   return (
     <group ref={groupRef}>
-      <mesh>
-        <sphereGeometry args={[MOON_RADIUS, 32, 32]} />
+      <mesh castShadow receiveShadow>
+        <icosahedronGeometry args={[MOON_RADIUS, 12]} />
         <shaderMaterial
           vertexShader={moonVertex}
           fragmentShader={moonFragment}
