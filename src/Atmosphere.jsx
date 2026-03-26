@@ -20,23 +20,30 @@ const atmosFragment = /* glsl */`
   varying vec3 vWorldPos;
 
   void main() {
-    vec3  viewDir = normalize(cameraPosition - vWorldPos);
+    vec3  V       = normalize(cameraPosition - vWorldPos);
     vec3  N       = normalize(vNormal);
+    
+    // ── Fresnel Rim (Ánh sáng viền) ───────────────────────────────────────
+    float fresnel = pow(1.0 + dot(N, V), 3.0); 
 
-    // Fresnel rim - Đã giảm số mũ xuống 3.5 để quầng sáng khí quyển dày và mềm hơn
-    float base    = 0.5 - dot(N, viewDir);
-    float fresnel = pow(clamp(base, 0.0, 1.0), 3.5);
-
-    // Sun-aware brightness
+    // ── Hướng nắng (Sun interaction) ──────────────────────────────────────
     float sunDot    = dot(N, normalize(uSunDirection));
-    float sunFactor = smoothstep(-0.5, 0.8, sunDot) * 0.60 + 0.40;
+    // Tăng mức tối thiểu (0.45) để quầng sáng không bao giờ biến mất hoàn toàn
+    float sunWeight = smoothstep(-0.3, 0.6, sunDot) * 0.55 + 0.45;
 
-    // Color: cyan-blue day, deep blue night
-    vec3 dayColor   = vec3(0.22, 0.55, 1.00);
-    vec3 nightColor = vec3(0.04, 0.09, 0.35);
-    vec3 atmosColor = mix(nightColor, dayColor, smoothstep(-0.3, 0.7, sunDot));
+    // ── Màu sắc khí quyển ──────────────────────────────────────────────────
+    vec3 dayColor   = vec3(0.3, 0.6, 1.0);     // Xanh Cyan sáng
+    vec3 nightColor = vec3(0.08, 0.12, 0.42);  // Xanh đêm rõ hơn (tăng độ sáng đêm)
+    vec3 glowColor  = mix(nightColor, dayColor, smoothstep(-0.2, 0.5, sunDot));
 
-    gl_FragColor = vec4(atmosColor, 1.0) * fresnel * sunFactor * 0.58;
+    // Tính toán màu cuối cùng
+    // Nhân thêm sunWeight cho màu nhưng giữ fresnel chủ đạo
+    vec3 finalGlow = glowColor * fresnel * sunWeight * 1.8;
+
+    // Alpha: Giữ lại quầng sáng viền ngay cả ở mặt tối (không nhân sunWeight vào alpha)
+    float alpha = fresnel * 0.7;
+
+    gl_FragColor = vec4(finalGlow, alpha);
   }
 `
 
@@ -63,7 +70,7 @@ export default function Atmosphere({ sunWorldPosRef }) {
     <mesh
       ref={meshRef}
       // Đã tăng scale lên 1.18 để khí quyển trông bao phủ rộng hơn một chút
-      scale={[1.18, 1.18, 1.18]}
+      scale={[1.01, 1.01, 1.01]}
       raycast={() => {}}
     >
       <sphereGeometry args={[2, 64, 64]} />
