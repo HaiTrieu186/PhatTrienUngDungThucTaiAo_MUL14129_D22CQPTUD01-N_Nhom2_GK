@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
 // Tăng lên 12000 – vẫn rất mượt trên Quest 3 (chỉ là points, rất nhẹ)
-const STAR_COUNT = 12000
+const STAR_COUNT = 5000
 
 // Spectral class colors (approximate blackbody RGB for Quest 3 display)
 // Weighted toward real stellar population (M-dwarfs dominate the galaxy)

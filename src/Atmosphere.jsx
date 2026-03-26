@@ -7,7 +7,7 @@ import * as THREE from 'three'
 export default function Atmosphere() {
   const uniforms = useMemo(() => ({
     color1: { value: new THREE.Color(0x3b82f6) }, // Xanh dương rực rỡ
-    fresnelPower: { value: 2.5 }, // Giảm số mũ để hào quang loang rộng và mềm hơn
+    fresnelPower: { value: 6.0 }, // Giảm số mũ để hào quang loang rộng và mềm hơn
   }), [])
 
   const vertexShader = `
@@ -38,7 +38,7 @@ export default function Atmosphere() {
 
   return (
     <mesh
-      scale={[1.01, 1.01, 1.01]} // Tăng kích thước bao phủ để quầng sáng trông dày hơn (10%)
+      scale={[1.01, 1.01, 1.01]} // Tăng kích thước bao phủ để quầng sáng trông dày hơn (1%)
       raycast={() => { }}
     >
       <sphereGeometry args={[2, 64, 64]} />
