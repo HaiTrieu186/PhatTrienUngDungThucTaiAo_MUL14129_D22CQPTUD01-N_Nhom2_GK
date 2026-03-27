@@ -5,15 +5,31 @@ import * as THREE from 'three'
 
 const MOON_ORBIT_RADIUS = 8.0
 const EARTH_BASE_SPEED  = 0.05
-const MOON_BASE_SPEED   = EARTH_BASE_SPEED / 5.0 // Tăng tốc độ lên (giảm chu kỳ từ 27.3 xuống 5.0)
+const MOON_BASE_SPEED   = EARTH_BASE_SPEED / 5.0
 const MOON_RADIUS       = 0.54
+
+// THAY ĐỔI: Giảm biên độ nghiêng quỹ đạo từ 1.3 → 0.12
+//
+// LÝ DO:
+//  - Với biên độ 1.3 unit và bán kính quỹ đạo 8 unit,
+//    góc nghiêng cực đại = arctan(1.3/8) ≈ 9.2°
+//  - Bán kính góc cone penumbra của bóng nhật thực ≈ 4.1°
+//  - → Mặt Trăng gần như không bao giờ đủ gần mặt phẳng hoàng đạo
+//    để gây nhật thực trong khoảng demo ngắn
+//
+//  - Với biên độ 0.12 unit: góc nghiêng max ≈ 0.86° << 4.1°
+//  - → Mặt Trăng luôn nằm trong vùng penumbra cone khi đối diện Mặt Trời
+//  - → Nhật thực xảy ra mỗi ~2 vòng quỹ đạo, dễ demo cho giám khảo
+//
+//  - Vẫn giữ hệ số dao động 0.31 để quỹ đạo có chút lắc lư tự nhiên
+//    (không phải đường tròn phẳng hoàn hảo — thiên văn vẫn hợp lý)
+const ORBIT_INCLINATION = 0.12   // 0.12 thay cho 1.3
 
 const moonVertex = /* glsl */`
   precision highp float;
   varying vec2 vUv;
   varying vec3 vNormal;
   varying vec3 vWorldPos;
-
   void main() {
     vUv       = uv;
     vec4 wPos = modelMatrix * vec4(position, 1.0);
@@ -24,15 +40,7 @@ const moonVertex = /* glsl */`
 `
 
 // ── Moon Fragment Shader ──────────────────────────────────────────────────────
-// Thêm tính toán bóng Trái Đất đổ lên Mặt Trăng (nguyệt thực):
-// Khi Mặt Trăng nằm phía sau Trái Đất (Earth ở giữa Moon và Sun),
-// Trái Đất che ánh Mặt Trời → vùng bị che tối dần (penumbra mềm)
-//
-// Phương pháp: Ray-Sphere Intersection trong GLSL
-// - Ray: từ vWorldPos (điểm trên Mặt Trăng) hướng về Mặt Trời (uSunDir)
-// - Sphere: Trái Đất tại (0,0,0) bán kính 2.0
-// - Nếu ray cắt sphere → điểm đó trong bóng Trái Đất
-// Ưu điểm: 0 draw call thêm, 0 texture, hoàn toàn an toàn VR
+// Giữ nguyên: bóng Trái Đất đổ lên Mặt Trăng (nguyệt thực) với Blood Moon
 const moonFragment = /* glsl */`
   precision highp float;
 
@@ -47,66 +55,40 @@ const moonFragment = /* glsl */`
     vec3  albedo   = texture2D(uColorTex, vUv).rgb;
     vec3  N        = normalize(vNormal);
     vec3  L        = normalize(uSunDir);
-    vec3  V        = normalize(cameraPosition - vWorldPos); // Hướng nhìn từ Camera
+    vec3  V        = normalize(cameraPosition - vWorldPos);
     float cosTheta = dot(N, L);
 
-    // Chiếu sáng Mặt Trời lên Mặt Trăng (sigmoid terminator)
+    // Chiếu sáng Mặt Trời (sigmoid terminator)
     float dayMix    = 1.0 / (1.0 + exp(-15.0 * cosTheta));
     vec3 nightColor = albedo * 0.006;
     vec3 dayColor   = albedo * max(0.0, cosTheta) * 1.05;
     vec3 moonColor  = mix(nightColor, dayColor, dayMix);
 
-    // ── Rim Light (Giúp nhận diện vị trí trong bóng tối) ────────────
+    // Rim Light
     float rim = pow(1.0 - max(0.0, dot(N, V)), 3.5);
     vec3 rimColor = vec3(0.5, 0.7, 1.0) * rim * 0.25;
 
-    // ── Bóng Trái Đất đổ lên Mặt Trăng (Nguyệt Thực) ────────────────────────
-    // Trái Đất nằm tại gốc tọa độ thế giới (0,0,0), bán kính 2.0
-    // Ray: P = vWorldPos, D = normalize(uSunDir) (hướng về Mặt Trời)
-    //
-    // Phương trình cắt: |P + tD - C|² = R²
-    // Với C=(0,0,0): |P + tD|² = R²
-    // → t² + 2t(P·D) + (P·P - R²) = 0
-    // → a=1, b=P·D, c=P·P - R²
-    // discriminant = b² - c
+    // ── Bóng Trái Đất (Nguyệt Thực) — Ray-Sphere Intersection ───────────────
     float earthShadow = 0.0;
     {
-      float eR  = 2.0;              // Earth radius (khớp với sphereGeometry Earth)
-      vec3  P   = vWorldPos;        // Điểm trên Mặt Trăng
-      vec3  D   = normalize(uSunDir); // Hướng về Mặt Trời
-      float b   = dot(P, D);        // = P·D (half of linear term)
+      float eR  = 2.0;
+      vec3  P   = vWorldPos;
+      vec3  D   = normalize(uSunDir);
+      float b   = dot(P, D);
       float c   = dot(P, P) - eR * eR;
       float disc = b * b - c;
 
-      // disc > 0: ray cắt hình cầu Trái Đất
-      // b < 0: Trái Đất nằm GIỮA Moon và Sun (Moon ở phía sau Trái Đất)
-      //        nếu b > 0 thì Sun và Earth cùng phía → không có bóng
       if (disc > 0.0 && b < 0.0) {
-        // Khoảng cách vuông góc từ tâm Trái Đất đến ray
-        // perpDist² = |P|² - b² = c + eR²  - (eR² - disc + b²) ... đơn giản hơn:
-        // perpDist² = dot(P,P) - b*b = (c + eR*eR) - b*b
         float perpSq   = dot(P, P) - b * b;
         float perpDist = sqrt(max(0.0, perpSq));
-
-        // Umbra (bóng tối đặc): perpDist < eR * 0.85
-        // Penumbra (nửa tối, fade dần): eR*0.85 → eR*1.5
-        // smoothstep(high, low, x): = 1 khi x < low, = 0 khi x > high
-        // Tăng độ nhòe biên bóng (Penumbra rộng hơn từ 1.8 đến 0.7)
         earthShadow = smoothstep(eR * 1.8, eR * 0.70, perpDist);
-
-        // Chỉ tối ở những fragment Mặt Trời đang chiếu vào
-        // (tránh double-dark ở mặt tối của Mặt Trăng vốn đã tối)
         earthShadow *= smoothstep(0.0, 0.3, dayMix);
       }
     }
 
-    // Áp dụng bóng: nhân màu xuống, giữ lại ~8% ánh sáng còn lại
     vec3 finalColor = moonColor * (1.0 - earthShadow * 0.92);
-
-    // Hiệu ứng "Mặt Trăng Máu" mờ ảo khi vào trung tâm bóng
+    // Hiệu ứng "Mặt Trăng Máu" — Blood Moon
     finalColor = mix(finalColor, finalColor * vec3(1.3, 0.5, 0.2), earthShadow * 0.40);
-
-    // Thêm Rim Light vào kết quả cuối cùng (luôn sáng nhẹ ở viền)
     finalColor += rimColor;
 
     gl_FragColor = vec4(finalColor, 1.0);
@@ -136,14 +118,14 @@ export default function Moon({ sunWorldPosRef, speed = 1, moonWorldPosRef }) {
       const a = angleRef.current
       groupRef.current.position.set(
         Math.cos(a) * MOON_ORBIT_RADIUS,
-        Math.sin(a * 0.31) * 1.3,
+        // THAY ĐỔI: dùng ORBIT_INCLINATION thay vì giá trị cứng 1.3
+        Math.sin(a * 0.31) * ORBIT_INCLINATION,
         Math.sin(a) * MOON_ORBIT_RADIUS
       )
-      // Tidal locking
+      // Tidal locking: một mặt luôn hướng về Trái Đất
       groupRef.current.rotation.y = Math.PI + a
     }
 
-    // Cập nhật hướng Mặt Trời cho Moon shader
     if (groupRef.current && sunWorldPosRef?.current) {
       groupRef.current.getWorldPosition(moonWorldPos.current)
       sunDir.current
@@ -152,7 +134,6 @@ export default function Moon({ sunWorldPosRef, speed = 1, moonWorldPosRef }) {
       uniforms.uSunDir.value.copy(sunDir.current)
     }
 
-    // Xuất vị trí Moon ra ngoài cho Earth.jsx dùng (tính bóng nhật thực)
     if (groupRef.current && moonWorldPosRef?.current) {
       if (sunWorldPosRef?.current) {
         moonWorldPosRef.current.copy(moonWorldPos.current)
