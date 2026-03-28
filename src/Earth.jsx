@@ -20,22 +20,27 @@ const earthVertex = /* glsl */`
 `
 
 // ── Earth Fragment Shader ─────────────────────────────────────────────────────
-// THAY ĐỔI: Thay moonShadow (xấp xỉ) bằng Angular Disc Intersection
-// chính xác pixel-perfect cho hiệu ứng nhật thực với umbra + penumbra.
 //
-// Công thức: Tính tỉ lệ diện tích đĩa Mặt Trời bị đĩa Mặt Trăng che
-// từ góc nhìn của từng điểm trên bề mặt Trái Đất.
-//   θs  = bán kính góc biểu kiến của Mặt Trời
-//   θm  = bán kính góc biểu kiến của Mặt Trăng
-//   θsm = khoảng cách góc biểu kiến giữa 2 tâm
-// → Circle-circle intersection area / Sun disc area = tỉ lệ che khuất
+//  1. NORMAL MAP  — Giả lập địa hình núi/biển nhấp nhô bằng Analytical TBN.
+//     Không tốn vertex nào thêm, chi phí GPU cực nhỏ (2 cross + 1 normalize).
+//
+//  2. SPECULAR MAP — Dùng đúng texture trắng/đen của solarsystemscope để
+//     xác định vùng biển (trắng = phản sáng) vs đất liền (đen = mờ).
+//     Chính xác hơn hẳn cách đoán bằng luminance.
+//
+//  3. Eclipse logic GIỮ NGUYÊN 100% (Angular Disc Intersection pixel-perfect).
 const earthFragment = /* glsl */`
   precision highp float;
+
   uniform sampler2D uDayTexture;
   uniform sampler2D uNightTexture;
-  uniform vec3 uSunDirection;
-  uniform vec3 uSunWorldPos;
-  uniform vec3 uMoonWorldPos;
+  uniform sampler2D uNormalMap;        // Normal Map địa hình
+  uniform sampler2D uSpecularMap;      // Specular Map (trắng=biển, đen=đất)
+  uniform float     uNormalStrength;   // Độ sâu địa hình, chỉnh 0.3–0.8
+  uniform vec3      uSunDirection;
+  uniform vec3      uSunWorldPos;
+  uniform vec3      uMoonWorldPos;
+
   varying vec2 vUv;
   varying vec3 vNormal;
   varying vec3 vWorldPos;
@@ -43,72 +48,109 @@ const earthFragment = /* glsl */`
   void main() {
     vec3 day   = texture2D(uDayTexture,   vUv).rgb;
     vec3 night = texture2D(uNightTexture, vUv).rgb;
-    vec3 N = normalize(vNormal);
-    vec3 L = normalize(uSunDirection);
-    vec3 V = normalize(cameraPosition - vWorldPos);
+
+    // ── 1. NORMAL MAP — Analytical TBN cho hình cầu ────────────────────────
+    // Hình cầu equirectangular: tangent frame tính 100% từ geometric normal,
+    // không cần attribute tangent nào thêm vào geometry.
+    vec3 mapN  = texture2D(uNormalMap, vUv).xyz * 2.0 - 1.0;
+    vec3 N_geo = normalize(vNormal);
+    vec3 up    = abs(N_geo.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 T     = normalize(cross(up, N_geo));
+    vec3 B     = cross(N_geo, T);
+
+    // CÔNG THỨC ĐÚNG: normalize(vec3(xy * strength, z)) thay vì mix
+    // → khi strength cao, normal nghiêng đúng hướng, không bị méo/artifact
+    vec3 blendN = normalize(vec3(mapN.xy * uNormalStrength, mapN.z));
+    mat3 TBN   = mat3(T, B, N_geo);
+    vec3 N     = normalize(TBN * blendN);
+    // ───────────────────────────────────────────────────────────────────────
+
+    vec3  L = normalize(uSunDirection);
+    vec3  V = normalize(cameraPosition - vWorldPos);
     float d = dot(N, L);
 
     // Day/night blending
-    float dayMix = smoothstep(-0.10, 0.40, d);
+    float dayMix  = smoothstep(-0.10, 0.40, d);
     float diffuse = max(0.0, d);
-    vec3 dayLit  = day * (diffuse + 0.04);
+    float diffuseContrast = pow(diffuse, 0.8);
+
+    // ── 2. HEIGHT-BASED TERRAIN SHADING — hiện địa hình mọi góc nhìn ─────────
+    //
+    // Ý tưởng: length(mapN.xy) = độ dốc địa hình tại điểm đó
+    //   → 0.0 = mặt phẳng (biển, đồng bằng)
+    //   → 1.0 = vách núi dựng đứng (Himalaya, Andes)
+    //
+    // Dùng độ dốc để:
+    //   1. "slope"  → tô màu vùng núi khác đồng bằng (bất kể góc nhìn)
+    //   2. "peakAO" → giả lập AO: thung lũng tối hơn, đỉnh núi sáng hơn
+    //   3. Kết hợp với oceanMask để không ảnh hưởng lên biển
+    //
+    // Hoàn toàn MIỄN PHÍ: tận dụng mapN đã sample, không cần texture thêm.
+    // Chi phí GPU: 3–4 phép tính float → cực nhẹ, Quest 3 thoải mái.
+
+    float oceanMask  = texture2D(uSpecularMap, vUv).r;
+    float landMask   = 1.0 - oceanMask;  // 1.0 = đất liền, 0.0 = biển
+
+    // Độ dốc: càng cao → càng là núi/cao nguyên
+    float slope      = clamp(length(mapN.xy) * 1.4, 0.0, 1.0);
+
+    // Tầng 1 — Micro-contrast: đỉnh núi sáng hơn, thung lũng tối hơn
+    // Tạo cảm giác chiều sâu ngay cả khi ánh sáng chiếu thẳng
+    float peakBright = slope * 0.18 * landMask;      // đỉnh núi sáng thêm
+    float valleyDark = (1.0 - slope) * 0.06 * landMask; // thung lũng tối thêm
+    float terrainAO  = 1.0 + peakBright - valleyDark;
+
+    // Tầng 2 — Tint màu địa hình: núi cao → hơi xám/trắng (đá/tuyết)
+    // Đất thấp → giữ màu texture gốc
+    // Chỉ áp dụng cho đất liền, không chạm vào biển
+    vec3 rockTint    = mix(vec3(1.0), vec3(0.92, 0.90, 0.88), slope * 0.35 * landMask);
+
+    vec3 dayLit  = day * rockTint * terrainAO * (diffuseContrast * 1.1 + 0.03);
     vec3 cityLit = night * 2.6 + vec3(0.012, 0.012, 0.025);
 
-    // Ocean specular highlight
-    vec3 R = reflect(-L, N);
+    // ── 3. SPECULAR MAP — Ocean highlight ────────────────────────────────────
+    vec3  R     = reflect(-L, N);
     float spec  = pow(max(0.0, dot(R, V)), 150.0);
-    float lum   = dot(day, vec3(0.299, 0.587, 0.114));
-    float ocean = clamp((0.48 - lum) * 3.0, 0.0, 1.0);
-    vec3 specC  = vec3(0.75, 0.88, 1.0) * spec * ocean
-                  * smoothstep(0.25, 0.65, diffuse) * 0.40;
+    vec3  specC = vec3(0.75, 0.88, 1.0)
+                  * spec * oceanMask
+                  * smoothstep(0.25, 0.65, diffuse) * 0.45;
+    // ───────────────────────────────────────────────────────────────────────
 
     vec3 surface = mix(cityLit, dayLit, dayMix) + specC;
 
-    // ── Nhật Thực: Angular Disc Intersection ─────────────────────────────────
-    // Tính tỉ lệ đĩa Mặt Trời bị Mặt Trăng che khuất nhìn từ mỗi điểm bề mặt.
-    // Hoàn toàn trong Fragment Shader → pixel-perfect, 0 draw call, VR-safe.
+    // ── 3. NHẬT THỰC — Angular Disc Intersection (GIỮ NGUYÊN) ────────────────
     float eclipseShadow = 0.0;
     {
-      vec3 toSun  = normalize(uSunDirection);
-      vec3 moonVec = uMoonWorldPos - vWorldPos;
-      float dMe   = length(moonVec);
-      vec3 toMoon = moonVec / dMe;
-      float dSe   = length(uSunWorldPos - vWorldPos);
+      float d_geo  = dot(N_geo, L);
+      vec3  toSun  = normalize(uSunDirection);
+      vec3  moonVec = uMoonWorldPos - vWorldPos;
+      float dMe    = length(moonVec);
+      vec3  toMoon = moonVec / dMe;
+      float dSe    = length(uSunWorldPos - vWorldPos);
 
-      // Bán kính góc biểu kiến (radians) của Mặt Trời và Mặt Trăng
-      // nhìn từ điểm bề mặt hiện tại
-      float thetaS  = 16.9 / dSe;   // SUN_RADIUS / dist_surface_to_sun
-      float thetaM  = 0.54 / dMe;   // MOON_RADIUS / dist_surface_to_moon
-
-      // Góc phân cách giữa tâm hai thiên thể
+      float thetaS  = 16.9 / dSe;
+      float thetaM  = 0.54 / dMe;
       float cosSM   = clamp(dot(toSun, toMoon), -1.0, 1.0);
       float thetaSM = acos(cosSM);
 
-      // Điều kiện: Mặt Trăng phải nằm giữa bề mặt và Mặt Trời,
-      // và hai đĩa thiên thể phải giao nhau
       if (dot(toMoon, toSun) > 0.0 && thetaSM < thetaS + thetaM) {
         float overlap;
         if (thetaSM <= abs(thetaM - thetaS)) {
-          // Nhật thực toàn phần (Mặt Trăng che hoàn toàn) hoặc hình khuyên
           float r = thetaM / thetaS;
           overlap = min(1.0, r * r);
         } else {
-          // Nhật thực một phần — công thức giao nhau 2 đường tròn
-          float cosA = (thetaSM*thetaSM + thetaS*thetaS - thetaM*thetaM)
-                        / (2.0 * thetaSM * thetaS);
-          float cosB = (thetaSM*thetaSM + thetaM*thetaM - thetaS*thetaS)
-                        / (2.0 * thetaSM * thetaM);
-          float A = thetaS*thetaS * acos(clamp(cosA, -1.0, 1.0));
-          float B = thetaM*thetaM * acos(clamp(cosB, -1.0, 1.0));
-          // Diện tích tam giác (Heron's formula)
-          float det = (-thetaSM+thetaS+thetaM) * (thetaSM+thetaS-thetaM)
-                    * (thetaSM-thetaS+thetaM) * (thetaSM+thetaS+thetaM);
-          float intersectArea = A + B - 0.5 * sqrt(max(0.0, det));
-          float sunArea = 3.14159265 * thetaS * thetaS;
-          overlap = clamp(intersectArea / sunArea, 0.0, 1.0);
+          float cosA   = (thetaSM*thetaSM + thetaS*thetaS - thetaM*thetaM)
+                         / (2.0 * thetaSM * thetaS);
+          float cosB   = (thetaSM*thetaSM + thetaM*thetaM - thetaS*thetaS)
+                         / (2.0 * thetaSM * thetaM);
+          float A      = thetaS*thetaS * acos(clamp(cosA, -1.0, 1.0));
+          float B_area = thetaM*thetaM * acos(clamp(cosB, -1.0, 1.0));
+          float det    = (-thetaSM+thetaS+thetaM) * (thetaSM+thetaS-thetaM)
+                       * (thetaSM-thetaS+thetaM) * (thetaSM+thetaS+thetaM);
+          float intersectArea = A + B_area - 0.5 * sqrt(max(0.0, det));
+          overlap = clamp(intersectArea / (3.14159265 * thetaS * thetaS), 0.0, 1.0);
         }
-        // Chỉ tối ở phần bề mặt đang nhận ánh sáng Mặt Trời
-        eclipseShadow = overlap * smoothstep(-0.05, 0.15, d);
+        eclipseShadow = overlap * smoothstep(-0.05, 0.15, d_geo);
       }
     }
 
@@ -116,9 +158,7 @@ const earthFragment = /* glsl */`
   }
 `
 
-// ── Cloud Fragment Shader ─────────────────────────────────────────────────────
-// THAY ĐỔI: Thêm eclipse shadow cho mây (cùng công thức angular disc)
-// → mây cũng tối đi khi nhật thực xảy ra, tạo hiệu ứng nhất quán
+// ── Cloud Fragment Shader  ───────────────────────────────────────
 const cloudFragment = /* glsl */`
   precision highp float;
   uniform sampler2D uCloudsTexture;
@@ -133,8 +173,8 @@ const cloudFragment = /* glsl */`
     float cloud = texture2D(uCloudsTexture, vUv).r;
     if (cloud < 0.012) discard;
 
-    vec3 N = normalize(vNormal);
-    vec3 L = normalize(uSunDirection);
+    vec3  N = normalize(vNormal);
+    vec3  L = normalize(uSunDirection);
     float d = dot(N, L);
 
     float cloudLit = smoothstep(-0.1, 0.40, d);
@@ -144,17 +184,16 @@ const cloudFragment = /* glsl */`
     vec3 cloudWarm  = vec3(0.85, 0.68, 0.48);
     vec3 cloudNight = vec3(0.08, 0.12, 0.22);
 
-    vec3 cloudColor = mix(cloudNight, mix(cloudWhite, cloudWarm, twi), cloudLit);
+    vec3  cloudColor = mix(cloudNight, mix(cloudWhite, cloudWarm, twi), cloudLit);
     float finalAlpha = cloud * mix(0.48, 0.78, cloudLit);
 
-    // ── Eclipse shadow trên mây (cùng angular disc formula) ──────────────────
     float eclipseShadow = 0.0;
     {
-      vec3 toSun   = normalize(uSunDirection);
-      vec3 moonVec = uMoonWorldPos - vWorldPos;
-      float dMe    = length(moonVec);
-      vec3 toMoon  = moonVec / dMe;
-      float dSe    = length(uSunWorldPos - vWorldPos);
+      vec3  toSun   = normalize(uSunDirection);
+      vec3  moonVec = uMoonWorldPos - vWorldPos;
+      float dMe     = length(moonVec);
+      vec3  toMoon  = moonVec / dMe;
+      float dSe     = length(uSunWorldPos - vWorldPos);
       float thetaS  = 16.9 / dSe;
       float thetaM  = 0.54 / dMe;
       float thetaSM = acos(clamp(dot(toSun, toMoon), -1.0, 1.0));
@@ -162,24 +201,19 @@ const cloudFragment = /* glsl */`
       if (dot(toMoon, toSun) > 0.0 && thetaSM < thetaS + thetaM) {
         float overlap;
         if (thetaSM <= abs(thetaM - thetaS)) {
-          float r = thetaM / thetaS;
-          overlap = min(1.0, r * r);
+          float r = thetaM / thetaS; overlap = min(1.0, r * r);
         } else {
-          float cosA = (thetaSM*thetaSM + thetaS*thetaS - thetaM*thetaM)
-                        / (2.0*thetaSM*thetaS);
-          float cosB = (thetaSM*thetaSM + thetaM*thetaM - thetaS*thetaS)
-                        / (2.0*thetaSM*thetaM);
-          float A = thetaS*thetaS * acos(clamp(cosA, -1.0, 1.0));
-          float B = thetaM*thetaM * acos(clamp(cosB, -1.0, 1.0));
-          float det = (-thetaSM+thetaS+thetaM)*(thetaSM+thetaS-thetaM)
-                    * (thetaSM-thetaS+thetaM)*(thetaSM+thetaS+thetaM);
-          float intersectArea = A + B - 0.5*sqrt(max(0.0, det));
-          overlap = clamp(intersectArea/(3.14159265*thetaS*thetaS), 0.0, 1.0);
+          float cosA   = (thetaSM*thetaSM + thetaS*thetaS - thetaM*thetaM) / (2.0*thetaSM*thetaS);
+          float cosB   = (thetaSM*thetaSM + thetaM*thetaM - thetaS*thetaS) / (2.0*thetaSM*thetaM);
+          float A      = thetaS*thetaS * acos(clamp(cosA,-1.0,1.0));
+          float B_area = thetaM*thetaM * acos(clamp(cosB,-1.0,1.0));
+          float det    = (-thetaSM+thetaS+thetaM)*(thetaSM+thetaS-thetaM)
+                       * (thetaSM-thetaS+thetaM)*(thetaSM+thetaS+thetaM);
+          overlap = clamp((A+B_area-0.5*sqrt(max(0.0,det)))/(3.14159265*thetaS*thetaS),0.0,1.0);
         }
         eclipseShadow = overlap * smoothstep(-0.05, 0.15, d);
       }
     }
-    // Mây tối màu + giảm alpha nhẹ khi bị che bóng
     cloudColor *= (1.0 - eclipseShadow * 0.92);
     finalAlpha  *= (1.0 - eclipseShadow * 0.12);
 
@@ -205,7 +239,7 @@ function formatNum(n) {
   return n.toLocaleString()
 }
 
-// ── Continent Label Component ─────────────────────────────────────────────────
+// ── Continent Label Component (GIỮ NGUYÊN) ───────────────────────────────────
 function ContinentLabel({ name, lat, lon, area, population, fact, activeId, setActiveId }) {
   const isSelected = activeId === name
   const [hovered, setHovered] = useState(false)
@@ -267,7 +301,6 @@ function ContinentLabel({ name, lat, lon, area, population, fact, activeId, setA
             <planeGeometry args={[1.84, 0.94 + factLines.length * 0.08]} />
             <meshBasicMaterial color="#3b82f6" transparent opacity={0.3} depthWrite={false} />
           </mesh>
-
           <group position={[-0.8, 0.35 + (factLines.length * 0.04), 0.01]}>
             <Text fontSize={0.14} color="#facc15" anchorX="left" fontWeight="bold">
               {name.toUpperCase()}
@@ -300,17 +333,16 @@ function ContinentLabel({ name, lat, lon, area, population, fact, activeId, setA
   )
 }
 
-// ── Cloud Layer ───────────────────────────────────────────────────────────────
-// THAY ĐỔI: Nhận thêm moonWorldPosRef để cập nhật eclipse uniforms cho shader mây
+// ── Cloud Layer (GIỮ NGUYÊN) ──────────────────────────────────────────────────
 function CloudLayer({ cloudsTex, sunWorldPosRef, moonWorldPosRef, speed }) {
-  const meshRef      = useRef()
+  const meshRef       = useRef()
   const cloudWorldPos = useRef(new THREE.Vector3())
 
   const cloudUniforms = useMemo(() => ({
     uCloudsTexture: { value: cloudsTex },
     uSunDirection:  { value: new THREE.Vector3(0, 0, -1) },
-    uSunWorldPos:   { value: new THREE.Vector3(0, 0, -250) }, // thêm mới
-    uMoonWorldPos:  { value: new THREE.Vector3(0, 8, 0) },   // thêm mới
+    uSunWorldPos:   { value: new THREE.Vector3(0, 0, -250) },
+    uMoonWorldPos:  { value: new THREE.Vector3(0, 8, 0) },
   }), [cloudsTex])
 
   useFrame((_, delta) => {
@@ -319,14 +351,10 @@ function CloudLayer({ cloudsTex, sunWorldPosRef, moonWorldPosRef, speed }) {
     if (meshRef.current && sunWorldPosRef?.current) {
       meshRef.current.getWorldPosition(cloudWorldPos.current)
       cloudUniforms.uSunDirection.value.copy(
-        new THREE.Vector3()
-          .subVectors(sunWorldPosRef.current, cloudWorldPos.current)
-          .normalize()
+        new THREE.Vector3().subVectors(sunWorldPosRef.current, cloudWorldPos.current).normalize()
       )
-      // Cập nhật vị trí thực của Mặt Trời cho eclipse calculation
       cloudUniforms.uSunWorldPos.value.copy(sunWorldPosRef.current)
     }
-
     if (moonWorldPosRef?.current) {
       cloudUniforms.uMoonWorldPos.value.copy(moonWorldPosRef.current)
     }
@@ -351,39 +379,41 @@ export default function Earth({ speed = 1, sunWorldPosRef, moonWorldPosRef }) {
   const earthGroupRef = useRef()
   const [activeId, setActiveId] = useState(null)
 
-  const [dayTex, nightTex, cloudsTex] = useTexture([
+  // Load 5 textures: 3 cũ + 2 mới (Normal Map + Specular Map)
+  // QUAN TRỌNG: normalTex và specularTex KHÔNG set SRGBColorSpace — phải để Linear!
+  const [dayTex, nightTex, cloudsTex, normalTex, specularTex] = useTexture([
     '/textures/day.jpg',
     '/textures/night.jpg',
-    '/textures/clouds.jpg'
+    '/textures/clouds.jpg',
+    '/textures/earth_normal.jpg',     
+    '/textures/earth_specular.jpg', 
   ], ([d, n]) => {
     d.colorSpace = n.colorSpace = THREE.SRGBColorSpace
+    // normalTex, specularTex tự động là Linear — KHÔNG chỉnh colorSpace
   })
 
-  // THAY ĐỔI: Thêm uSunWorldPos vào uniforms để shader tính bán kính góc Mặt Trời
   const earthUniforms = useMemo(() => ({
-    uDayTexture:   { value: dayTex },
-    uNightTexture: { value: nightTex },
-    uSunDirection: { value: new THREE.Vector3(0, 0, -1) },
-    uSunWorldPos:  { value: new THREE.Vector3(0, 0, -250) }, // thêm mới
-    uMoonWorldPos: { value: new THREE.Vector3(0, 8, 0) },
-  }), [dayTex, nightTex])
+    uDayTexture:     { value: dayTex },
+    uNightTexture:   { value: nightTex },
+    uNormalMap:      { value: normalTex },
+    uSpecularMap:    { value: specularTex },
+    uNormalStrength: { value: 3.5 },  // công thức mới: 2–5 là đẹp, không artifact
+    uSunDirection:   { value: new THREE.Vector3(0, 0, -1) },
+    uSunWorldPos:    { value: new THREE.Vector3(0, 0, -250) },
+    uMoonWorldPos:   { value: new THREE.Vector3(0, 8, 0) },
+  }), [dayTex, nightTex, normalTex, specularTex])
 
   useFrame((_, delta) => {
     if (earthGroupRef.current) {
       earthGroupRef.current.rotation.y += delta * 0.05 * speed
     }
-
     if (sunWorldPosRef?.current) {
       const earthPos = new THREE.Vector3()
       earthGroupRef.current.getWorldPosition(earthPos)
-      // Hướng Mặt Trời từ tâm Trái Đất
       earthUniforms.uSunDirection.value
-        .subVectors(sunWorldPosRef.current, earthPos)
-        .normalize()
-      // Vị trí thực của Mặt Trời (dùng cho tính bán kính góc biểu kiến trong shader)
+        .subVectors(sunWorldPosRef.current, earthPos).normalize()
       earthUniforms.uSunWorldPos.value.copy(sunWorldPosRef.current)
     }
-
     if (moonWorldPosRef?.current) {
       earthUniforms.uMoonWorldPos.value.copy(moonWorldPosRef.current)
     }
@@ -391,7 +421,6 @@ export default function Earth({ speed = 1, sunWorldPosRef, moonWorldPosRef }) {
 
   return (
     <group ref={earthGroupRef}>
-      {/* Bấm vào quả đất để đóng card đang mở */}
       <mesh castShadow onClick={() => setActiveId(null)}>
         <sphereGeometry args={[2, 64, 64]} />
         <shaderMaterial
@@ -401,7 +430,6 @@ export default function Earth({ speed = 1, sunWorldPosRef, moonWorldPosRef }) {
         />
       </mesh>
 
-      {/* THAY ĐỔI: Truyền moonWorldPosRef vào CloudLayer */}
       <CloudLayer
         cloudsTex={cloudsTex}
         sunWorldPosRef={sunWorldPosRef}
