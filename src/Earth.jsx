@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import { useTexture, Text, Billboard } from '@react-three/drei'
 import * as THREE from 'three'
 import geoData from './continents.json'
+import AuroraRings from './AuroraRings'   
 
 // ── Vertex Shader ─────────────────────────────────────────────────────────────
 const earthVertex = /* glsl */`
@@ -436,6 +437,11 @@ export default function Earth({ speed = 1, sunWorldPosRef, moonWorldPosRef }) {
         moonWorldPosRef={moonWorldPosRef}
         speed={speed}
       />
+
+      {/* ── THÊM MỚI: Cực quang 2 cực ──────────────────────────────────────── */}
+      {/* Đặt bên trong earthGroupRef để aurora tự động đúng vị trí theo Earth  */}
+      {/* sunWorldPosRef đã có sẵn từ props — truyền thẳng vào, không cần thêm  */}
+      <AuroraRings sunWorldPosRef={sunWorldPosRef} />
 
       {geoData.regions.map(c => (
         <ContinentLabel
