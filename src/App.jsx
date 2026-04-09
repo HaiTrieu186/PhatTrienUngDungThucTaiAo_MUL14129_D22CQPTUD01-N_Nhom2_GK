@@ -16,7 +16,7 @@ useTexture.preload('/textures/night.jpg')
 useTexture.preload('/textures/clouds.jpg')
 useTexture.preload('/textures/sun.jpg')
 useTexture.preload('/textures/moon_color.jpg')
-useTexture.preload('/textures/milkyway.jpg')
+useTexture.preload('/textures/milky_way.jpg')
 
 const SEASONS = [
   { key: 'spring', label: '🌸 Xuân', color: '#a8e063', border: '#6abf4b' },
